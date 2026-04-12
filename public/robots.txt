@@ -1,0 +1,14 @@
+# Kari King — Robots.txt
+# https://app.kariking.in
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /delivery
+Disallow: /onboarding
+Disallow: /user-onboarding
+Disallow: /verification-pending
+Disallow: /profile
+
+# Sitemap
+Sitemap: https://app.kariking.in/sitemap.xml

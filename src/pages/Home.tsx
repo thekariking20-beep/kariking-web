@@ -1,0 +1,321 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { collection, query, getDocs, where, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Product, HomepageContent } from '../types';
+import ProductCard from '../components/ProductCard';
+import BannerSlider from '../components/home/BannerSlider';
+import OffersRow from '../components/home/OffersRow';
+import { motion } from 'motion/react';
+import { Star, Clock, ShieldCheck, ChevronRight, Flame, ArrowRight, ShoppingCart } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useCategories } from '../context/CategoriesContext';
+import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
+
+// ─── Default CMS content used when Firestore has nothing yet ─────────────────
+const DEFAULT_BANNERS: HomepageContent[] = [
+  {
+    id: 'default-1',
+    type: 'banner',
+    title: 'Welcome to Kari King 👑',
+    subtitle: 'Fresh Organic Meat Delivered to Your Doorstep',
+    imageUrl: 'https://images.unsplash.com/photo-1603048297172-c92544798d5a?w=1600&q=80',
+    buttonText: 'Order Now',
+    redirectLink: '/products',
+    badgeLabel: '🔥 Fresh Today',
+    badgeColor: 'bg-red-600',
+    isActive: true,
+    order: 0,
+    createdAt: '',
+  },
+];
+
+const DEFAULT_OFFERS: HomepageContent[] = [
+  {
+    id: 'default-offer-1',
+    type: 'offer',
+    title: '₹100 OFF on First Order',
+    subtitle: 'Use code at checkout • Min order ₹299',
+    couponCode: 'KARI100',
+    badgeLabel: '🎉 New User',
+    isActive: true,
+    order: 0,
+    createdAt: '',
+  },
+  {
+    id: 'default-offer-2',
+    type: 'offer',
+    title: 'Free Delivery above ₹500',
+    subtitle: 'Add more to your cart and save on delivery',
+    badgeLabel: '🚚 Free Ship',
+    isActive: true,
+    order: 1,
+    createdAt: '',
+  },
+  {
+    id: 'default-offer-3',
+    type: 'offer',
+    title: '10% OFF on Chicken Today',
+    subtitle: 'Only valid on country chicken orders',
+    couponCode: 'CHICKEN10',
+    badgeLabel: '🍗 Today Only',
+    isActive: true,
+    order: 2,
+    createdAt: '',
+  },
+];
+
+const features = [
+  { icon: ShieldCheck, title: 'Quality Assured', desc: '100% fresh & hygienic', gradient: 'from-emerald-500 to-green-600' },
+  { icon: Clock, title: 'Fast Delivery', desc: 'Delivered in 45–60 mins', gradient: 'from-amber-500 to-orange-600' },
+  { icon: Star, title: 'Best Prices', desc: 'Direct from farm to door', gradient: 'from-[#8B0000] to-[#DC2626]' },
+];
+
+export default function Home() {
+  const { user } = useAuth();
+  const { addToCart } = useCart();
+  const navigate = useNavigate();
+  const { categories: MAIN_CATEGORIES } = useCategories();
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [cmsContent, setCmsContent] = useState<HomepageContent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [cmsLoading, setCmsLoading] = useState(true);
+  const [favorites, setFavorites] = useState<Product[]>([]);
+
+  // ─── Fetch products ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    getDocs(query(collection(db, 'products'), where('isAvailable', '==', true)))
+      .then(snap => {
+        const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+        setProducts(prods);
+
+        // Simulated personalization: fetch favorites based on matching logic or random pick for demo
+        if (user && prods.length > 0) {
+          // just taking a random slice for 'Reorder your favorites' to simulate
+          setFavorites([prods[0], prods[prods.length > 1 ? 1 : 0]]);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [user]);
+
+  // ─── Fetch homepage CMS ──────────────────────────────────────────────────────
+  useEffect(() => {
+    getDocs(
+      query(collection(db, 'homepageContent'), where('isActive', '==', true), orderBy('order', 'asc'))
+    )
+      .then(snap => {
+        if (snap.empty) {
+          setCmsContent([]);
+        } else {
+          setCmsContent(snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
+        }
+      })
+      .catch(() => setCmsContent([]))
+      .finally(() => setCmsLoading(false));
+  }, []);
+
+  // ─── Derived CMS slices ──────────────────────────────────────────────────────
+  const banners = useMemo(() => {
+    const fromCms = cmsContent.filter(c => c.type === 'banner');
+    return fromCms.length ? fromCms : DEFAULT_BANNERS;
+  }, [cmsContent]);
+
+  const offers = useMemo(() => {
+    const fromCms = cmsContent.filter(c => c.type === 'offer');
+    return fromCms.length ? fromCms : DEFAULT_OFFERS;
+  }, [cmsContent]);
+
+  // ─── Product grouping ────────────────────────────────────────────────────────
+  const grouped = useMemo(() => {
+    const map: Record<string, Record<string, Product[]>> = {};
+    products.forEach(p => {
+      const main = p.mainCategory || p.category || 'Others';
+      const sub = p.subCategory || 'General';
+      if (!map[main]) map[main] = {};
+      if (!map[main][sub]) map[main][sub] = [];
+      map[main][sub].push(p);
+    });
+    return map as Record<string, Record<string, Product[]>>;
+  }, [products]);
+
+  const activeMains = MAIN_CATEGORIES.filter(cat => grouped[cat.id]);
+
+  return (
+    <div className="space-y-8">
+      {/* ─── PERSONALIZATION TOP ──────────────────────────────────────────────── */}
+      <div className="px-1">
+        <h1 className="text-2xl font-black text-gray-900 tracking-tight">
+          {user ? `Hey ${user.name ? user.name.split(' ')[0] : 'Balan'} 👋` : 'Welcome to Kari King ✨'}
+        </h1>
+        <p className="text-gray-500 text-sm font-medium mt-0.5">Let's crave something fresh today.</p>
+      </div>
+
+      {/* ─── BANNER SLIDER ──────────────────────────────────────────────────── */}
+      {cmsLoading ? (
+        <div className="w-full h-[260px] md:h-[380px] rounded-3xl bg-gray-100 animate-pulse" />
+      ) : (
+        <BannerSlider banners={banners} />
+      )}
+
+      {/* ─── TRUST FEATURES ─────────────────────────────────────────────────── */}
+      <section className="grid grid-cols-3 gap-3">
+        {features.map((f, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.07 }}
+            className="bg-white p-3 rounded-2xl border border-gray-100/80 flex flex-col items-center text-center gap-2 shadow-[0_2px_12px_rgba(0,0,0,0.04)] premium-card"
+          >
+            <div className={`bg-gradient-to-br ${f.gradient} p-2.5 rounded-xl text-white shadow-md`}>
+              <f.icon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-bold text-gray-900 text-xs leading-tight">{f.title}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">{f.desc}</p>
+            </div>
+          </motion.div>
+        ))}
+      </section>
+
+      {/* ─── OFFERS & COUPONS ───────────────────────────────────────────────── */}
+      {cmsLoading ? (
+        <div className="flex gap-4 overflow-hidden">
+          {[1, 2, 3].map(i => <div key={i} className="w-[280px] h-[130px] shrink-0 bg-gray-100 animate-pulse rounded-2xl" />)}
+        </div>
+      ) : (
+        <OffersRow offers={offers} />
+      )}
+
+      {/* ─── CATEGORY QUICK-NAV ─────────────────────────────────────────────── */}
+      <section>
+        <h2 className="text-xl font-black text-gray-900 mb-4">Shop by Category</h2>
+        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+          {MAIN_CATEGORIES.map((cat, i) => (
+            <motion.div key={cat.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+              <Link
+                to={`/products?category=${cat.id}`}
+                className={`snap-start shrink-0 flex flex-col items-center gap-1.5 px-5 py-3 rounded-2xl bg-gradient-to-br ${cat.color} text-white min-w-[100px] hover:scale-105 transition-transform shadow-lg premium-card`}
+              >
+                <span className="text-2xl">{cat.icon}</span>
+                <span className="text-[10px] font-black uppercase tracking-widest">{cat.label}</span>
+              </Link>
+            </motion.div>
+          ))}
+        </div>
+      </section>
+
+      {/* ─── GROUPED PRODUCT SECTIONS ───────────────────────────────────────── */}
+      {/* FAVORITES (If authenticated) */}
+      {user && favorites.length > 0 && !loading && (
+        <section className="bg-premium-gradient -mx-4 px-4 py-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+          <h2 className="text-xl font-black text-white mb-4 relative z-10 flex items-center gap-2"> Reorder Favorites <Star className="w-5 h-5 text-amber-300 fill-amber-300"/></h2>
+          <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-none snap-x relative z-10">
+            {favorites.map(product => (
+              <div key={`fav-${product.id}`} className="snap-start shrink-0 w-[220px] bg-white rounded-3xl p-3 shadow-lg flex items-center gap-3">
+                 <div className="relative">
+                   <img src={product.image} className="w-14 h-14 rounded-2xl object-cover shadow-sm bg-gray-50" />
+                   {product.discountPercentage ? (
+                     <span className="absolute -top-1 -left-1 bg-red-500 text-white text-[7px] font-black px-1.5 py-0.5 rounded-full shadow-sm leading-none">
+                       {product.discountPercentage}%
+                     </span>
+                   ) : null}
+                 </div>
+                 <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 line-clamp-1">{product.name}</p>
+                    <div className="flex items-baseline gap-1.5 mt-0.5">
+                      <span className="text-[13px] font-black text-gray-900">₹{product.sellingPrice}</span>
+                      {product.mrpPrice > product.sellingPrice && (
+                        <span className="text-[10px] text-gray-400 line-through">₹{product.mrpPrice}</span>
+                      )}
+                    </div>
+                 </div>
+                 <button className="ripple-btn bg-gray-100 p-2 rounded-xl text-[#7A0000] hover:bg-red-50 transition-colors" onClick={() => addToCart(product)}>
+                   <ShoppingCart className="w-4 h-4" />
+                 </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {loading ? (
+        <div className="space-y-10">
+          {[1, 2].map(i => (
+            <div key={i} className="space-y-4">
+              <div className="h-8 w-40 bg-gray-200 animate-pulse rounded-xl" />
+              <div className="flex gap-4 overflow-hidden">
+                {[1, 2, 3].map(j => (
+                  <div key={j} className="h-72 w-52 shrink-0 bg-gray-100 rounded-[20px] shadow-sm relative overflow-hidden">
+                     <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : activeMains.length === 0 ? (
+        <div className="text-center py-16 bg-white rounded-3xl border-2 border-dashed border-gray-200 shadow-sm">
+          <p className="text-4xl mb-3">🥩</p>
+          <p className="text-gray-600 font-bold">No products yet.</p>
+          <p className="text-gray-400 text-sm mt-1">Add products from the Admin panel to get started.</p>
+        </div>
+      ) : (
+        <div className="space-y-10">
+          {activeMains.map((mainCat, mainIdx) => {
+            const subGroups = grouped[mainCat.id] as Record<string, Product[]>;
+            const totalCount = (Object.values(subGroups) as Product[][]).flat().length;
+
+            return (
+              <motion.section
+                key={mainCat.id}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-60px' }}
+                transition={{ delay: mainIdx * 0.04 }}
+              >
+                {/* Section header */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${mainCat.color} flex items-center justify-center text-xl shadow-md`}>
+                      {mainCat.icon}
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-gray-900">{mainCat.label}</h2>
+                      <p className="text-[11px] text-gray-400 font-medium">{totalCount} {totalCount === 1 ? 'product' : 'products'}</p>
+                    </div>
+                  </div>
+                  <Link to={`/products?category=${mainCat.id}`} className="flex items-center gap-1 text-sm font-bold text-[#8B0000] hover:underline">
+                    View All <ChevronRight className="w-4 h-4" />
+                  </Link>
+                </div>
+
+                {/* Subcategory rows */}
+                <div className="space-y-6">
+                  {(Object.entries(subGroups) as [string, Product[]][]).map(([subName, subProducts]) => (
+                    <div key={subName}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-black text-gray-600 bg-gray-50 px-3 py-1 rounded-full border border-gray-100">{subName}</span>
+                        <div className="h-px flex-1 bg-gray-100" />
+                      </div>
+                      <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-none snap-x -mx-4 px-4">
+                        {subProducts.map(product => (
+                          <div key={product.id} className="snap-start shrink-0 w-[210px]">
+                            <ProductCard product={product} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.section>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

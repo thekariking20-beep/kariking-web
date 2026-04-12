@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helper Functions ────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    function isManager() {
+      return isAuthenticated() && getUserRole() == 'manager';
+    }
+
+    function isDashboardUser() {
+      return isAdmin() || isManager();
+    }
+
+    // ─── Users Collection ────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow read: if isDashboardUser();
+      allow write: if isOwner(userId);
+      allow write: if isAdmin();
+    }
+
+    // ─── Orders Collection ───────────────────────────────────────────────
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && resource.data.deliveryPartnerId == request.auth.uid;
+      allow read: if isDashboardUser();
+      // SECURITY: Order creation must happen via Cloud Function 'createOrder' ONLY
+      allow create: if false; 
+      allow update: if isDashboardUser();
+      allow update: if isAuthenticated() && resource.data.deliveryPartnerId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ─── Products Collection ─────────────────────────────────────────────
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Categories Collection ───────────────────────────────────────────
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Provisioned Staff Collection ────────────────────────────────────
+    match /provisionedStaff/{phone} {
+      // Security: Prevent phone number harvesting by non-authenticated users
+      allow read: if isAuthenticated() && (request.auth.token.phone_number == phone || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // ─── Referrals Collection ────────────────────────────────────────────
+    match /referrals/{referralId} {
+      allow read: if isAuthenticated() && (
+        resource.data.referrerId == request.auth.uid ||
+        resource.data.referredUserId == request.auth.uid
+      );
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+    }
+
+    // ─── Homepage Content ────────────────────────────────────────────────
+    match /homepageContent/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── System Settings ─────────────────────────────────────────────────
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Coin Transactions ───────────────────────────────────────────────
+    match /coinTransactions/{txId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+    }
+  }
+}

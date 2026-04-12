@@ -1,0 +1,317 @@
+import React, { useState } from 'react';
+import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown } from 'lucide-react';
+import { Order, User } from '../../types';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../firebase';
+import { downloadInvoice } from '../../lib/invoiceGenerator';
+
+interface AdminOrdersTabProps {
+  orders: Order[];
+  deliveryPartners: User[];
+  assignDeliveryPartner: (orderId: string, partnerId: string) => Promise<void>;
+  updateOrderStatus: (orderId: string, newStatus: Order['status']) => Promise<void>;
+}
+
+// ─── Payment Badge Component ────────────────────────────────────────────
+function PaymentBadge({ method, status }: { method: string; status: string }) {
+  const configs: Record<string, { icon: React.ElementType; bg: string; text: string; label: string }> = {
+    razorpay: { icon: Zap, bg: 'bg-green-100', text: 'text-green-700', label: 'Razorpay' },
+    qr: { icon: QrCode, bg: 'bg-blue-100', text: 'text-blue-700', label: 'UPI QR' },
+    coins: { icon: Coins, bg: 'bg-amber-100', text: 'text-amber-700', label: 'Coins' },
+    cod: { icon: CreditCard, bg: 'bg-gray-100', text: 'text-gray-600', label: 'COD' },
+  };
+  const config = configs[method] || configs.cod;
+  const Icon = config.icon;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${config.bg} ${config.text}`}>
+        <Icon className="w-3 h-3" /> {config.label}
+      </span>
+      {status === 'pending_verification' && (
+        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-orange-100 text-orange-700 animate-pulse">
+          <Clock className="w-3 h-3" /> Pending
+        </span>
+      )}
+      {status === 'paid' && (
+        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-green-100 text-green-700">
+          <CheckCircle2 className="w-3 h-3" /> Paid
+        </span>
+      )}
+      {status === 'failed' && (
+        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-red-100 text-red-700">
+          <XCircle className="w-3 h-3" /> Failed
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── QR Verification Action Buttons ──────────────────────────────────────
+function QrVerifyActions({ orderId }: { orderId: string }) {
+  const [verifying, setVerifying] = useState<'approve' | 'reject' | null>(null);
+  const [done, setDone] = useState<'approved' | 'rejected' | null>(null);
+
+  const handleVerify = async (action: 'approve' | 'reject') => {
+    setVerifying(action);
+    try {
+      const verifyFn = httpsCallable(functions, 'verifyQrPayment');
+      await verifyFn({ orderId, action });
+      setDone(action === 'approve' ? 'approved' : 'rejected');
+    } catch (err) {
+      console.error('QR verify error:', err);
+      alert('Verification failed. Please try again.');
+    }
+    setVerifying(null);
+  };
+
+  if (done) {
+    return (
+      <div className={`text-xs font-black uppercase tracking-widest text-center py-2 rounded-xl ${
+        done === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+      }`}>
+        {done === 'approved' ? '✅ Payment Approved' : '❌ Payment Rejected'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <button
+        onClick={() => handleVerify('approve')}
+        disabled={verifying !== null}
+        className="flex-1 bg-green-600 text-white text-xs font-black py-2 rounded-xl flex items-center justify-center gap-1 hover:bg-green-700 disabled:opacity-50 transition-colors"
+      >
+        {verifying === 'approve' ? '...' : <><CheckCircle2 className="w-3.5 h-3.5" /> Approve</>}
+      </button>
+      <button
+        onClick={() => handleVerify('reject')}
+        disabled={verifying !== null}
+        className="flex-1 bg-red-600 text-white text-xs font-black py-2 rounded-xl flex items-center justify-center gap-1 hover:bg-red-700 disabled:opacity-50 transition-colors"
+      >
+        {verifying === 'reject' ? '...' : <><XCircle className="w-3.5 h-3.5" /> Reject</>}
+      </button>
+    </div>
+  );
+}
+
+// ─── Order Card Component ────────────────────────────────────────────────
+function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrderStatus, accentColor }: {
+  key?: React.Key;
+  order: Order;
+  deliveryPartners: User[];
+  assignDeliveryPartner: (orderId: string, partnerId: string) => Promise<void>;
+  updateOrderStatus: (orderId: string, newStatus: Order['status']) => Promise<void>;
+  accentColor: string;
+}) {
+  const isQrPending = order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification';
+
+  return (
+    <div className={`bg-white p-4 rounded-2xl border shadow-sm hover:shadow-md transition-all ${
+      isQrPending ? 'border-orange-200 ring-2 ring-orange-100' : `border-${accentColor}-100`
+    }`}>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{order.id.slice(-6)}</span>
+        <span className={`text-xs font-black bg-${accentColor}-100 text-${accentColor}-700 px-2 py-0.5 rounded uppercase`}>{order.status}</span>
+      </div>
+
+      {/* Payment Info */}
+      <div className="mb-2">
+        <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
+      </div>
+
+      <h4 className="font-bold text-gray-900 mb-0.5">{order.phone}</h4>
+      <p className="text-xs text-gray-500 mb-2 truncate">{order.address}</p>
+
+      {/* Price breakdown */}
+      <div className="flex items-center justify-between mb-1">
+        <span className="font-black text-xl text-red-600">₹{order.finalAmount || order.totalAmount}</span>
+        <span className="text-xs text-gray-400 font-medium">{new Date(order.createdAt).toLocaleDateString()}</span>
+      </div>
+      {order.coinsUsed > 0 && (
+        <p className="text-[10px] text-amber-600 font-bold mb-3">
+          🪙 {order.coinsUsed} coins used (−₹{order.coinsUsed * 20})
+        </p>
+      )}
+
+      {/* QR Verification Actions (only for pending QR payments) */}
+      {isQrPending && (
+        <div className="mb-3">
+          <QrVerifyActions orderId={order.id} />
+        </div>
+      )}
+
+      <select 
+        className={`w-full mb-2 p-2 text-xs font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-${accentColor}-500/20`}
+        value={order.deliveryPartnerId || ''}
+        onChange={(e) => assignDeliveryPartner(order.id, e.target.value)}
+      >
+        <option value="">Assign Delivery Partner</option>
+        {deliveryPartners.filter(p => p.isAvailable !== false).map(p => (
+          <option key={p.uid} value={p.uid}>🟢 {p.name || p.phone}</option>
+        ))}
+      </select>
+      <select 
+        className={`w-full p-2 text-xs font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-${accentColor}-500/20`}
+        value={order.status}
+        onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+      >
+        <option value="Order Placed">Order Placed</option>
+        <option value="Order Received">Order Received</option>
+        <option value="Packed">Packed</option>
+        <option value="Dispatched">Dispatched</option>
+        <option value="Delivered">Delivered</option>
+        <option value="Cancelled">Cancelled</option>
+      </select>
+      {order.status === 'Delivered' && (
+        <button
+          onClick={() => downloadInvoice(order)}
+          className="w-full mt-2 flex items-center justify-center gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white py-2 rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-sm hover:shadow-md active:scale-[0.98] transition-all"
+        >
+          <FileDown className="w-3.5 h-3.5" />
+          Invoice
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus }: AdminOrdersTabProps) {
+  // Count QR pending orders
+  const qrPendingCount = orders.filter(o => o.paymentMethod === 'qr' && o.paymentStatus === 'pending_verification').length;
+
+  return (
+    <div className="space-y-6">
+      {/* QR Pending Alert */}
+      {qrPendingCount > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center flex-shrink-0">
+            <QrCode className="w-5 h-5 text-orange-600" />
+          </div>
+          <div className="flex-1">
+            <h4 className="font-black text-orange-900 text-sm">QR Payments Pending Verification</h4>
+            <p className="text-xs text-orange-700">{qrPendingCount} order{qrPendingCount > 1 ? 's' : ''} waiting for payment confirmation</p>
+          </div>
+          <span className="bg-orange-500 text-white text-xs font-bold px-3 py-1 rounded-lg animate-pulse">
+            {qrPendingCount}
+          </span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* Column 1: Normal Orders (Red) */}
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-200px)]">
+          <div className="p-4 border-b border-gray-100 bg-red-50 flex items-center justify-between sticky top-0 z-10">
+            <h3 className="font-black text-red-900 flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-red-600"/> Normal Orders</h3>
+            <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-lg">{orders.filter(o => !o.type || o.type === 'normal').length}</span>
+          </div>
+          <div className="p-4 overflow-y-auto space-y-4 bg-gray-50/30 flex-1 scrollbar-none">
+            {orders.filter(o => !o.type || o.type === 'normal').map(order => (
+              <OrderCard 
+                key={order.id} 
+                order={order} 
+                deliveryPartners={deliveryPartners} 
+                assignDeliveryPartner={assignDeliveryPartner} 
+                updateOrderStatus={updateOrderStatus}
+                accentColor="red"
+              />
+            ))}
+            {orders.filter(o => !o.type || o.type === 'normal').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No normal orders yet</p>}
+          </div>
+        </div>
+
+        {/* Column 2: Bulk Bookings (Blue) */}
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-200px)]">
+          <div className="p-4 border-b border-gray-100 bg-blue-50 flex items-center justify-between sticky top-0 z-10">
+            <h3 className="font-black text-blue-900 flex items-center gap-2"><Package className="w-5 h-5 text-blue-600"/> Bulk Bookings</h3>
+            <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-lg">{orders.filter(o => o.type === 'bulk').length}</span>
+          </div>
+          <div className="p-4 overflow-y-auto space-y-4 bg-gray-50/30 flex-1 scrollbar-none">
+            {orders.filter(o => o.type === 'bulk').map(order => (
+              <div key={order.id} className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{order.id.slice(-6)}</span>
+                  <span className="text-xs font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase">{order.status}</span>
+                </div>
+                <div className="mb-2">
+                  <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
+                </div>
+                <h4 className="font-bold text-gray-900 mb-0.5">{order.phone}</h4>
+                <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-blue-50/50 p-2 rounded-xl border border-blue-50">
+                  <p><span className="font-bold text-gray-700">Req Date:</span> {order.bulkDetails?.expectedDate}</p>
+                  <p><span className="font-bold text-gray-700">Weight:</span> {order.bulkDetails?.weight}</p>
+                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Items:</span> {order.bulkDetails?.items}</p>
+                  {order.bulkDetails?.notes && <p className="line-clamp-1 italic">"{order.bulkDetails.notes}"</p>}
+                </div>
+                {order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification' && (
+                  <div className="mb-3">
+                    <QrVerifyActions orderId={order.id} />
+                  </div>
+                )}
+                <select 
+                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-blue-500/20"
+                  value={order.status}
+                  onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+                >
+                  <option value="Order Placed">New Inquiry</option>
+                  <option value="Order Received">Reviewed & Accepted</option>
+                  <option value="Packed">Sourcing Items</option>
+                  <option value="Dispatched">Dispatched</option>
+                  <option value="Delivered">Completed</option>
+                  <option value="Cancelled">Rejected/Cancelled</option>
+                </select>
+              </div>
+            ))}
+            {orders.filter(o => o.type === 'bulk').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No bulk requests yet</p>}
+          </div>
+        </div>
+
+        {/* Column 3: Function Bookings (Gold) */}
+        <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-200px)]">
+          <div className="p-4 border-b border-gray-100 bg-amber-50 flex items-center justify-between sticky top-0 z-10">
+            <h3 className="font-black text-amber-900 flex items-center gap-2"><PartyPopper className="w-5 h-5 text-amber-500"/> Function Bookings</h3>
+            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-lg">{orders.filter(o => o.type === 'function').length}</span>
+          </div>
+          <div className="p-4 overflow-y-auto space-y-4 bg-gray-50/30 flex-1 scrollbar-none">
+            {orders.filter(o => o.type === 'function').map(order => (
+              <div key={order.id} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-200 transition-all">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase text-amber-500 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">{order.functionDetails?.eventType}</span>
+                  <span className="text-xs font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded uppercase">{order.status}</span>
+                </div>
+                <div className="mb-2">
+                  <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
+                </div>
+                <h4 className="font-bold text-gray-900 mb-0.5">{order.phone}</h4>
+                <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-amber-50/30 p-2 rounded-xl border border-amber-50">
+                  <p><span className="font-bold text-gray-700">Date:</span> {order.functionDetails?.expectedDate} • <span className="font-bold text-gray-700">Guests:</span> {order.functionDetails?.peopleCount}</p>
+                  <p className="truncate"><span className="font-bold text-gray-700">Loc:</span> {order.functionDetails?.location}</p>
+                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Reqs:</span> {order.functionDetails?.items}</p>
+                  {order.functionDetails?.notes && <p className="line-clamp-1 italic">"{order.functionDetails.notes}"</p>}
+                </div>
+                {order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification' && (
+                  <div className="mb-3">
+                    <QrVerifyActions orderId={order.id} />
+                  </div>
+                )}
+                <select 
+                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-amber-500/20"
+                  value={order.status}
+                  onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+                >
+                  <option value="Order Placed">New Inquiry</option>
+                  <option value="Order Received">In Discussion</option>
+                  <option value="Packed">Confirmed</option>
+                  <option value="Dispatched">Processing</option>
+                  <option value="Delivered">Completed</option>
+                  <option value="Cancelled">Closed/Cancelled</option>
+                </select>
+              </div>
+            ))}
+            {orders.filter(o => o.type === 'function').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No event bookings yet</p>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

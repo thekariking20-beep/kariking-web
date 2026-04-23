@@ -88,7 +88,7 @@ export default function NavigationDrawer({ isOpen, onClose }: NavigationDrawerPr
                   <p className="text-red-100 text-[10px] font-black uppercase tracking-[0.2em] mb-1">Kari King 👑</p>
                   {user ? (
                     <>
-                      <h2 className="text-xl font-black text-white leading-tight">{user.name || 'Food Lover'}</h2>
+                      <h2 className="text-xl font-black text-white leading-tight">{user.name || 'Hey there!'}</h2>
                       <div className="flex items-center gap-1 text-red-100 mt-1">
                         <MapPin className="w-3 h-3" />
                         <span className="text-xs font-medium truncate max-w-[150px]">{user.address || 'Set your location'}</span>

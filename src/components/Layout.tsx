@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
 import { ShoppingCart, LogOut, Package, LayoutDashboard, Gift } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -27,8 +27,28 @@ export default function Layout() {
     { name: 'Deliveries',path: '/delivery', deliveryOnly: true },
   ];
 
+  // Track whether welcome animation is still active — start dark to prevent white flash
+  const [welcomeDone, setWelcomeDone] = useState(
+    () => localStorage.getItem('hasSeenWelcome') === 'true'
+  );
+
+  // Listen for welcome animation completing
+  useEffect(() => {
+    if (welcomeDone) return;
+    const check = () => {
+      if (localStorage.getItem('hasSeenWelcome') === 'true') {
+        setWelcomeDone(true);
+      }
+    };
+    const interval = setInterval(check, 200);
+    return () => clearInterval(interval);
+  }, [welcomeDone]);
+
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col w-full overflow-x-hidden">
+    <div className={cn(
+      "min-h-screen flex flex-col w-full overflow-x-hidden transition-colors duration-700",
+      welcomeDone ? 'bg-gray-50' : 'bg-[#0b0b0b]'
+    )}>
       {/* Push Notification Toasts */}
       <NotificationToast />
 

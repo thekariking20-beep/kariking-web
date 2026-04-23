@@ -4,10 +4,12 @@ import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useAddress } from '../context/AddressContext';
 import { httpsCallable } from 'firebase/functions';
 import { doc, increment, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db, functions } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
+import { formatQty } from '../lib/units';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { cn } from '../lib/utils';
@@ -27,24 +29,21 @@ const upiQrImage: string | null = null; // Set to imported image when ready
 export default function Cart() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
   const { user, refreshUser } = useAuth();
+  const { selectedAddress } = useAddress();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
-  const [address, setAddress] = useState(user?.address || '');
-  const [phone, setPhone] = useState(user?.phone || '');
+  
+  // Checkout reads directly from SSOT context
+  const address = selectedAddress?.fullAddress || '';
+  const phone = selectedAddress?.phone || user?.phone || '';
+  
   const [useCoins, setUseCoins] = useState(false);
   const [error, setError] = useState('');
   const [isLocationOpen, setIsLocationOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<Order['paymentMethod']>('razorpay');
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrOrderId, setQrOrderId] = useState('');
-  
-  // Sync address with user context if it updates via modal
-  React.useEffect(() => {
-    if (user?.address) {
-      setAddress(user.address);
-    }
-  }, [user?.address]);
 
   const { width, height } = useWindowSize();
 
@@ -58,16 +57,7 @@ export default function Cart() {
   const finalTotal = Math.max(0, totalPrice - discountAmount) + deliveryFee;
   const canPayFullyWithCoins = discountAmount >= totalPrice + deliveryFee;
 
-  const formatQty = (qty: number, unit?: string) => {
-    if (unit === 'gram') {
-      if (qty >= 1000 && qty % 1000 === 0) return `${qty / 1000}kg`;
-      if (qty >= 1000) return `${(qty / 1000).toFixed(2)}kg`;
-      return `${qty}g`;
-    }
-    if (unit === 'kg') return `${qty}kg`;
-    if (unit === 'piece') return `${qty} pcs`;
-    return qty;
-  };
+  // formatQty imported from lib/units
 
   // ─── Razorpay Integration ──────────────────────────────────────────────
   const loadRazorpay = useCallback((): Promise<boolean> => {
@@ -155,8 +145,8 @@ export default function Cart() {
       const response = await createOrderFn({
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
         address,
-        locationLat: user?.locationLat || null,
-        locationLng: user?.locationLng || null,
+        locationLat: selectedAddress?.locationLat || user?.locationLat || null,
+        locationLng: selectedAddress?.locationLng || user?.locationLng || null,
         phone,
         useCoins,
         coinsToUse: coinsBeingUsed,
@@ -170,14 +160,21 @@ export default function Cart() {
         throw new Error("Backend checkout failed.");
       }
 
-      // ─── Payment Flow by Method ────────────────────────────────────
       if (effectiveMethod === 'razorpay' && data.finalAmount > 0) {
         const paid = await handleRazorpayPayment(data.orderId, data.finalAmount);
         if (!paid) {
-          setError('Payment was cancelled. Your order has been saved — you can retry.');
+          setError('Payment was cancelled. Your order has been securely saved — you can retry payment from the Orders page.');
           setLoading(false);
+          // Wait briefly, then redirect them to orders so they can see the pending order and retry
+          setTimeout(() => navigate('/orders'), 2500);
           return;
         }
+
+        // Razorpay payment was successful! Wait for client-side confirmation then update DB
+        await updateDoc(doc(db, 'orders', data.orderId), {
+          paymentStatus: 'paid',
+          updatedAt: new Date().toISOString()
+        });
       }
 
       if (effectiveMethod === 'qr' && data.finalAmount > 0) {
@@ -383,9 +380,28 @@ export default function Cart() {
                 <span className="font-medium">₹{deliveryFee}</span>
               )}
             </div>
-            <div className="border-t pt-4 flex justify-between text-xl font-black text-gray-900 border-gray-100">
-              <span>Total</span>
-              <span className="text-transparent bg-premium-gradient bg-clip-text">₹{finalTotal}</span>
+
+            {/* ─── Total Amount — Premium Card ─────────────────── */}
+            <div className="relative mt-2 -mx-2 px-5 py-4 rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
+              <div className="absolute inset-0 opacity-20" style={{ background: 'radial-gradient(circle at 80% 20%, rgba(255,45,45,0.4) 0%, transparent 60%)' }} />
+              <div className="relative flex items-center justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">Total Amount</p>
+                  <p className="text-3xl font-black text-white" style={{ textShadow: '0 2px 10px rgba(255,45,45,0.3)' }}>
+                    ₹{Math.round(finalTotal * 100) / 100}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FF2D2D 0%, #7A0000 100%)', boxShadow: '0 4px 15px rgba(255,45,45,0.4)' }}>
+                    <ShoppingBag className="w-6 h-6 text-white" />
+                  </div>
+                </div>
+              </div>
+              {items.length > 0 && (
+                <p className="relative text-[10px] text-gray-400 mt-1">
+                  {items.length} item{items.length > 1 ? 's' : ''} • {deliveryFee === 0 ? 'Free delivery ✨' : `₹${deliveryFee} delivery`}
+                </p>
+              )}
             </div>
           </div>
 
@@ -423,11 +439,12 @@ export default function Cart() {
               </label>
               <input
                 type="tel"
-                className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500 outline-none text-sm shadow-inner bg-gray-50/50"
-                placeholder="10-digit phone number"
+                className="w-full p-3 border border-gray-200 rounded-xl outline-none text-sm shadow-inner bg-gray-50/70 text-gray-500 cursor-not-allowed font-medium"
+                placeholder="Select an address to load contact"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                readOnly
               />
+              <p className="text-[10px] text-gray-400 mt-2 font-medium">To update contact number, edit the address in Location settings.</p>
             </div>
           </div>
 

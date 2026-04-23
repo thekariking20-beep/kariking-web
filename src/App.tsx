@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import { PageLoader } from './components/SkeletonLoader';
+import FullScreenLoader from './components/FullScreenLoader';
 import ManageAddresses from './pages/ManageAddresses';
 import PaymentMethods from './pages/PaymentMethods';
 import PrivacyTerms from './pages/PrivacyTerms';
@@ -38,7 +39,7 @@ function ProtectedRoute({
 }) {
   const { user, loading, isDashboardUser, isDelivery, isStaff } = useAuth();
 
-  if (loading) return <PageLoader />;
+  if (loading) return null; // Root loader handles this
   if (!user) return <Navigate to="/login" replace />;
   
   // Profile Completion Gate (applies to ALL users unless skipped)
@@ -62,6 +63,10 @@ function ProtectedRoute({
 
   if (dashboardUserOnly && !isDashboardUser) return <Navigate to="/" replace />;
   if (deliveryOnly && !isDelivery) return <Navigate to="/" replace />;
+  // Delivery partners must be verified to access delivery routes
+  if (deliveryOnly && isDelivery && user.verificationStatus !== 'approved') {
+    return <Navigate to="/verification-pending" replace />;
+  }
 
   return <>{children}</>;
 }
@@ -70,96 +75,103 @@ function ProtectedRoute({
 function LoginRoute() {
   const { user, loading } = useAuth();
   
-  if (loading) return <PageLoader />;
+  if (loading) return null; // Root loader handles this
   if (user) return <Navigate to="/" replace />;
   
   return <Login />;
 }
 
 export default function App() {
+  const { loading } = useAuth();
+
   return (
-    <Router>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          {/* Login — auto-redirect if already authenticated */}
-          <Route path="/login" element={<LoginRoute />} />
-          
-          {/* Onboarding Routes — skip profile check to prevent infinite redirect */}
-          <Route path="/onboarding" element={<ProtectedRoute skipProfileCheck><Onboarding /></ProtectedRoute>} />
-          <Route path="/user-onboarding" element={<ProtectedRoute skipProfileCheck><UserOnboarding /></ProtectedRoute>} />
-          <Route path="/verification-pending" element={<ProtectedRoute skipProfileCheck><VerificationPending /></ProtectedRoute>} />
-          
-          {/* Public page — privacy/terms (accessible without auth) */}
-          <Route path="/privacy" element={<PrivacyTerms />} />
+    <>
+      {/* FullScreenLoader overlays everything while auth resolves */}
+      <FullScreenLoader isVisible={loading} />
 
-          {/* Protected App Routes — all inside Layout */}
-          <Route element={<Layout />}>
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Home />
-              </ProtectedRoute>
-            } />
-            <Route path="/products" element={
-              <ProtectedRoute>
-                <Products />
-              </ProtectedRoute>
-            } />
-            <Route path="/cart" element={
-              <ProtectedRoute>
-                <Cart />
-              </ProtectedRoute>
-            } />
-            <Route path="/orders" element={
-              <ProtectedRoute>
-                <Orders />
-              </ProtectedRoute>
-            } />
-            <Route path="/referral" element={
-              <ProtectedRoute>
-                <Referral />
-              </ProtectedRoute>
-            } />
-            <Route path="/bookings" element={
-              <ProtectedRoute>
-                <Bookings />
-              </ProtectedRoute>
-            } />
-            <Route path="/profile" element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            } />
-            <Route path="/profile/addresses" element={
-              <ProtectedRoute>
-                <ManageAddresses />
-              </ProtectedRoute>
-            } />
-            <Route path="/profile/payments" element={
-              <ProtectedRoute>
-                <PaymentMethods />
-              </ProtectedRoute>
-            } />
-            <Route path="/admin" element={
-              <ProtectedRoute dashboardUserOnly>
-                <Admin />
-              </ProtectedRoute>
-            } />
-            <Route path="/delivery" element={
-              <ProtectedRoute deliveryOnly>
-                <DeliveryDashboard />
-              </ProtectedRoute>
-            } />
-            <Route path="/delivery/profile" element={
-              <ProtectedRoute deliveryOnly>
-                <DeliveryProfile />
-              </ProtectedRoute>
-            } />
-          </Route>
+      <Router>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Login — auto-redirect if already authenticated */}
+            <Route path="/login" element={<LoginRoute />} />
+            
+            {/* Onboarding Routes — skip profile check to prevent infinite redirect */}
+            <Route path="/onboarding" element={<ProtectedRoute skipProfileCheck><Onboarding /></ProtectedRoute>} />
+            <Route path="/user-onboarding" element={<ProtectedRoute skipProfileCheck><UserOnboarding /></ProtectedRoute>} />
+            <Route path="/verification-pending" element={<ProtectedRoute skipProfileCheck><VerificationPending /></ProtectedRoute>} />
+            
+            {/* Public page — privacy/terms (accessible without auth) */}
+            <Route path="/privacy" element={<PrivacyTerms />} />
 
-          {/* 404 Catch-All — must be last */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
-    </Router>
+            {/* Protected App Routes — all inside Layout */}
+            <Route element={<Layout />}>
+              <Route path="/" element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              } />
+              <Route path="/products" element={
+                <ProtectedRoute>
+                  <Products />
+                </ProtectedRoute>
+              } />
+              <Route path="/cart" element={
+                <ProtectedRoute>
+                  <Cart />
+                </ProtectedRoute>
+              } />
+              <Route path="/orders" element={
+                <ProtectedRoute>
+                  <Orders />
+                </ProtectedRoute>
+              } />
+              <Route path="/referral" element={
+                <ProtectedRoute>
+                  <Referral />
+                </ProtectedRoute>
+              } />
+              <Route path="/bookings" element={
+                <ProtectedRoute>
+                  <Bookings />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile" element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile/addresses" element={
+                <ProtectedRoute>
+                  <ManageAddresses />
+                </ProtectedRoute>
+              } />
+              <Route path="/profile/payments" element={
+                <ProtectedRoute>
+                  <PaymentMethods />
+                </ProtectedRoute>
+              } />
+              <Route path="/admin" element={
+                <ProtectedRoute dashboardUserOnly>
+                  <Admin />
+                </ProtectedRoute>
+              } />
+              <Route path="/delivery" element={
+                <ProtectedRoute deliveryOnly>
+                  <DeliveryDashboard />
+                </ProtectedRoute>
+              } />
+              <Route path="/delivery/profile" element={
+                <ProtectedRoute deliveryOnly>
+                  <DeliveryProfile />
+                </ProtectedRoute>
+              } />
+            </Route>
+
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </Router>
+    </>
   );
 }
+

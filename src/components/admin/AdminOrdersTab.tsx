@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown } from 'lucide-react';
-import { Order, User } from '../../types';
+import { Order, User, BulkBooking } from '../../types';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../firebase';
+import { functions, db } from '../../firebase';
 import { downloadInvoice } from '../../lib/invoiceGenerator';
+import { collection, query, onSnapshot, orderBy, doc, updateDoc } from 'firebase/firestore';
 
 interface AdminOrdersTabProps {
   orders: Order[];
@@ -177,7 +178,25 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
 }
 
 export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus }: AdminOrdersTabProps) {
-  // Count QR pending orders
+  const [bookings, setBookings] = React.useState<BulkBooking[]>([]);
+
+  // Real-time listener for the separated Custom Meat Bookings layout
+  React.useEffect(() => {
+    const q = query(collection(db, 'bulkBookings'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, snap => {
+      setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() }) as BulkBooking));
+    });
+    return () => unsub();
+  }, []);
+
+  const updateBookingStatus = async (bookingId: string, newStatus: any) => {
+    await updateDoc(doc(db, 'bulkBookings', bookingId), {
+      status: newStatus,
+      updatedAt: new Date().toISOString()
+    });
+  };
+
+  // Count QR pending orders strictly for normal orders
   const qrPendingCount = orders.filter(o => o.paymentMethod === 'qr' && o.paymentStatus === 'pending_verification').length;
 
   return (
@@ -224,45 +243,37 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-200px)]">
           <div className="p-4 border-b border-gray-100 bg-blue-50 flex items-center justify-between sticky top-0 z-10">
             <h3 className="font-black text-blue-900 flex items-center gap-2"><Package className="w-5 h-5 text-blue-600"/> Bulk Bookings</h3>
-            <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-lg">{orders.filter(o => o.type === 'bulk').length}</span>
+            <span className="bg-blue-600 text-white text-xs font-bold px-2 py-1 rounded-lg">{bookings.filter(b => b.type === 'bulk').length}</span>
           </div>
           <div className="p-4 overflow-y-auto space-y-4 bg-gray-50/30 flex-1 scrollbar-none">
-            {orders.filter(o => o.type === 'bulk').map(order => (
-              <div key={order.id} className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all">
+            {bookings.filter(b => b.type === 'bulk').map(booking => (
+              <div key={booking.id} className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{order.id.slice(-6)}</span>
-                  <span className="text-xs font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase">{order.status}</span>
+                  <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{booking.id.slice(-6)}</span>
+                  <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase">{booking.status}</span>
                 </div>
-                <div className="mb-2">
-                  <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
-                </div>
-                <h4 className="font-bold text-gray-900 mb-0.5">{order.phone}</h4>
+                <h4 className="font-bold text-gray-900 mb-0.5">{booking.userName} • {booking.userPhone}</h4>
                 <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-blue-50/50 p-2 rounded-xl border border-blue-50">
-                  <p><span className="font-bold text-gray-700">Req Date:</span> {order.bulkDetails?.expectedDate}</p>
-                  <p><span className="font-bold text-gray-700">Weight:</span> {order.bulkDetails?.weight}</p>
-                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Items:</span> {order.bulkDetails?.items}</p>
-                  {order.bulkDetails?.notes && <p className="line-clamp-1 italic">"{order.bulkDetails.notes}"</p>}
+                  <p><span className="font-bold text-gray-700">Req Date:</span> {booking.requiredDate}</p>
+                  <p><span className="font-bold text-gray-700">Weight:</span> {booking.quantityRequirement}</p>
+                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Meat:</span> {booking.meatDetails}</p>
+                  {booking.notes && <p className="line-clamp-1 italic">"{booking.notes}"</p>}
                 </div>
-                {order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification' && (
-                  <div className="mb-3">
-                    <QrVerifyActions orderId={order.id} />
-                  </div>
-                )}
                 <select 
                   className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-blue-500/20"
-                  value={order.status}
-                  onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+                  value={booking.status}
+                  onChange={(e) => updateBookingStatus(booking.id, e.target.value)}
                 >
-                  <option value="Order Placed">New Inquiry</option>
-                  <option value="Order Received">Reviewed & Accepted</option>
-                  <option value="Packed">Sourcing Items</option>
-                  <option value="Dispatched">Dispatched</option>
-                  <option value="Delivered">Completed</option>
-                  <option value="Cancelled">Rejected/Cancelled</option>
+                  <option value="requested">Requested</option>
+                  <option value="reviewed">Reviewed (Awaiting Final Price)</option>
+                  <option value="awaiting_payment">Awaiting Adv Payment</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed</option>
+                  <option value="rejected">Rejected/Cancelled</option>
                 </select>
               </div>
             ))}
-            {orders.filter(o => o.type === 'bulk').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No bulk requests yet</p>}
+            {bookings.filter(b => b.type === 'bulk').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No bulk requests yet</p>}
           </div>
         </div>
 
@@ -270,45 +281,37 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden flex flex-col h-[calc(100vh-200px)]">
           <div className="p-4 border-b border-gray-100 bg-amber-50 flex items-center justify-between sticky top-0 z-10">
             <h3 className="font-black text-amber-900 flex items-center gap-2"><PartyPopper className="w-5 h-5 text-amber-500"/> Function Bookings</h3>
-            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-lg">{orders.filter(o => o.type === 'function').length}</span>
+            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-1 rounded-lg">{bookings.filter(b => b.type === 'function').length}</span>
           </div>
           <div className="p-4 overflow-y-auto space-y-4 bg-gray-50/30 flex-1 scrollbar-none">
-            {orders.filter(o => o.type === 'function').map(order => (
-              <div key={order.id} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-200 transition-all">
+            {bookings.filter(b => b.type === 'function').map(booking => (
+              <div key={booking.id} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-200 transition-all">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-black uppercase text-amber-500 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">{order.functionDetails?.eventType}</span>
-                  <span className="text-xs font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded uppercase">{order.status}</span>
+                  <span className="text-[10px] font-black uppercase text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">#{(booking.id).slice(-5)}</span>
+                  <span className="text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded uppercase">{booking.status}</span>
                 </div>
-                <div className="mb-2">
-                  <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
-                </div>
-                <h4 className="font-bold text-gray-900 mb-0.5">{order.phone}</h4>
+                <h4 className="font-bold text-gray-900 mb-0.5">{booking.userName} • {booking.userPhone}</h4>
                 <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-amber-50/30 p-2 rounded-xl border border-amber-50">
-                  <p><span className="font-bold text-gray-700">Date:</span> {order.functionDetails?.expectedDate} • <span className="font-bold text-gray-700">Guests:</span> {order.functionDetails?.peopleCount}</p>
-                  <p className="truncate"><span className="font-bold text-gray-700">Loc:</span> {order.functionDetails?.location}</p>
-                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Reqs:</span> {order.functionDetails?.items}</p>
-                  {order.functionDetails?.notes && <p className="line-clamp-1 italic">"{order.functionDetails.notes}"</p>}
+                  <p><span className="font-bold text-gray-700">Date:</span> {booking.requiredDate} • <span className="font-bold text-gray-700">Guests:</span> {booking.peopleCount}</p>
+                  <p className="truncate"><span className="font-bold text-gray-700">Loc:</span> {booking.location}</p>
+                  <p className="line-clamp-2"><span className="font-bold text-gray-700">Meat:</span> {booking.meatDetails}</p>
+                  {booking.notes && <p className="line-clamp-1 italic">"{booking.notes}"</p>}
                 </div>
-                {order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification' && (
-                  <div className="mb-3">
-                    <QrVerifyActions orderId={order.id} />
-                  </div>
-                )}
                 <select 
                   className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-amber-500/20"
-                  value={order.status}
-                  onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+                  value={booking.status}
+                  onChange={(e) => updateBookingStatus(booking.id, e.target.value)}
                 >
-                  <option value="Order Placed">New Inquiry</option>
-                  <option value="Order Received">In Discussion</option>
-                  <option value="Packed">Confirmed</option>
-                  <option value="Dispatched">Processing</option>
-                  <option value="Delivered">Completed</option>
-                  <option value="Cancelled">Closed/Cancelled</option>
+                  <option value="requested">Requested</option>
+                  <option value="reviewed">Reviewed (Awaiting Final Price)</option>
+                  <option value="awaiting_payment">Awaiting Adv Payment</option>
+                  <option value="confirmed">Confirmed</option>
+                  <option value="completed">Completed</option>
+                  <option value="rejected">Rejected/Cancelled</option>
                 </select>
               </div>
             ))}
-            {orders.filter(o => o.type === 'function').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No event bookings yet</p>}
+            {bookings.filter(b => b.type === 'function').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No event bookings yet</p>}
           </div>
         </div>
       </div>

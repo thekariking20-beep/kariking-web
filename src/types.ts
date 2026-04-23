@@ -13,6 +13,8 @@ export interface User {
   lockedCoins: number;
   isAvailable?: boolean;   // delivery partner online/offline toggle
   fcmToken?: string;       // Firebase Cloud Messaging push token
+  selectedAddressId?: string; // Global selected address for the user
+  authProvider?: 'otp' | 'password';
   profileComplete: boolean;
   // KYC & Verification
   verificationStatus?: 'pending' | 'approved' | 'rejected';
@@ -61,10 +63,12 @@ export interface Category {
 export interface Referral {
   id?: string;
   referrerId: string;
+  referrerPhone?: string;
   referredUserId: string;
   referredUserPhone?: string;
   status: 'pending' | 'completed';
   reward: number;
+  rewardGiven?: boolean;
   createdAt: string;
   completedAt?: string;
 }
@@ -81,7 +85,7 @@ export interface Product {
   mrpPrice: number;
   sellingPrice: number;
   discountPercentage?: number;
-  unitType?: 'kg' | 'gram' | 'piece';
+  unitType?: 'kg' | 'gram' | 'piece' | 'litre';
   baseWeight?: number;
   minOrderQty?: number;
   stepSize?: number;
@@ -94,7 +98,7 @@ export interface OrderItem {
   name: string;
   sellingPrice: number;
   quantity: number;
-  unitType?: 'kg' | 'gram' | 'piece';
+  unitType?: 'kg' | 'gram' | 'piece' | 'litre';
   baseWeight?: number;
   stepSize?: number;
   minOrderQty?: number;
@@ -121,6 +125,70 @@ export interface BulkDetails {
   expectedDate: string;
   notes?: string;
   items?: string;
+}
+
+// ─── New Bulk Booking Workflow Types ─────────────────────────────────────────
+
+export type BulkBookingStatus = 'requested' | 'reviewed' | 'awaiting_payment' | 'confirmed' | 'delivered' | 'completed' | 'rejected' | 'cancelled';
+export type BulkPaymentStatus = 'none' | 'pending' | 'paid' | 'verified';
+
+export interface BulkBookingItem {
+  productId: string;
+  productName: string;
+  productImage: string;
+  unitPrice: number;       // selling price per unit
+  quantity: number;        // in kg/pieces
+  unitType: 'kg' | 'gram' | 'piece';
+  subtotal: number;        // unitPrice × quantity
+}
+
+export interface BulkBooking {
+  id: string;
+  userId: string;
+  userName: string;
+  userPhone: string;
+
+  // Base details
+  type: 'bulk' | 'function';
+  peopleCount: number;
+
+  // Meat Spec
+  meatDetails: string;
+  quantityRequirement: string;
+
+  // Legacy item array (kept for backward schema safety)
+  items?: BulkBookingItem[];
+
+  // Pricing & Payments
+  quotedPrice?: number;         // Set by admin dynamically
+  advanceAmount?: number;       // 50% of quotedPrice
+  balanceAmount?: number;       // 50% remaining
+  advancePaid: boolean;         // Tracking Razorpay completion
+
+  // Dates, Times & Locations
+  requiredDate: string;
+  deliveryTime: string;
+  location: string;
+  notes?: string;
+  adminNotes?: string;
+
+  // Status
+  status: BulkBookingStatus;
+  paymentStatus: BulkPaymentStatus;
+  paymentMethod?: 'qr' | 'razorpay';
+
+  // Timestamps
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt?: string;
+  paidAt?: string;
+  confirmedAt?: string;
+  completedAt?: string;
+
+  // Cancellation audit
+  cancelReason?: string;
+  cancelledBy?: 'admin' | 'user';
+  cancelledAt?: string;
 }
 
 export interface FunctionDetails {

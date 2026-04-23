@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { db } from '../../firebase';
@@ -28,22 +28,14 @@ export default function StaffManagement() {
   const [tempPassword, setTempPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  const loadStaff = async () => {
-    setLoading(true);
-    try {
-      const snapshot = await getDocs(collection(db, 'provisionedStaff'));
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProvisionedStaff & { id: string }));
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'provisionedStaff'), snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as ProvisionedStaff & { id: string }));
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setStaff(list);
-    } catch (err) {
-      console.error(err);
-    } finally {
       setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadStaff();
+    }, err => { console.error(err); setLoading(false); });
+    return () => unsub();
   }, []);
 
   const handleAddStaff = async (e: React.FormEvent) => {
@@ -125,7 +117,7 @@ export default function StaffManagement() {
       setPhone('');
       setTempPassword('');
       setShowForm(false);
-      await loadStaff();
+      // onSnapshot auto-updates
     } catch (err: any) {
       console.error(err);
       if (err.code === 'auth/email-already-in-use') {
@@ -145,7 +137,7 @@ export default function StaffManagement() {
     try {
       await deleteDoc(doc(db, 'provisionedStaff', staffPhone));
       setSuccess(`Removed ${staffPhone}`);
-      await loadStaff();
+      // onSnapshot auto-updates
     } catch (err) {
       console.error(err);
       setError('Failed to remove staff member.');
@@ -387,16 +379,7 @@ export default function StaffManagement() {
         </div>
       )}
 
-      {/* Refresh */}
-      <div className="text-center">
-        <button
-          onClick={loadStaff}
-          disabled={loading}
-          className="text-xs text-gray-400 hover:text-indigo-500 font-bold flex items-center gap-1 mx-auto transition-colors"
-        >
-          <RefreshCw className="w-3 h-3" /> Refresh List
-        </button>
-      </div>
+      {/* Real-time — no manual refresh needed */}
     </div>
   );
 }

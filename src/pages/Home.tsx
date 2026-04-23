@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, getDocs, where, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, HomepageContent } from '../types';
 import ProductCard from '../components/ProductCard';
+import ProductGrid from '../components/ProductGrid';
 import BannerSlider from '../components/home/BannerSlider';
 import OffersRow from '../components/home/OffersRow';
 import { motion } from 'motion/react';
@@ -83,37 +84,28 @@ export default function Home() {
   const [cmsLoading, setCmsLoading] = useState(true);
   const [favorites, setFavorites] = useState<Product[]>([]);
 
-  // ─── Fetch products ──────────────────────────────────────────────────────────
+  // ─── Real-time products listener ───────────────────────────────────────────
   useEffect(() => {
-    getDocs(query(collection(db, 'products'), where('isAvailable', '==', true)))
-      .then(snap => {
-        const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
-        setProducts(prods);
-
-        // Simulated personalization: fetch favorites based on matching logic or random pick for demo
-        if (user && prods.length > 0) {
-          // just taking a random slice for 'Reorder your favorites' to simulate
-          setFavorites([prods[0], prods[prods.length > 1 ? 1 : 0]]);
-        }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    const q = query(collection(db, 'products'), where('isAvailable', '==', true));
+    const unsub = onSnapshot(q, snap => {
+      const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+      setProducts(prods);
+      if (user && prods.length > 0) {
+        setFavorites([prods[0], prods[prods.length > 1 ? 1 : 0]]);
+      }
+      setLoading(false);
+    }, err => { console.error(err); setLoading(false); });
+    return () => unsub();
   }, [user]);
 
-  // ─── Fetch homepage CMS ──────────────────────────────────────────────────────
+  // ─── Real-time CMS listener ──────────────────────────────────────────────────
   useEffect(() => {
-    getDocs(
-      query(collection(db, 'homepageContent'), where('isActive', '==', true), orderBy('order', 'asc'))
-    )
-      .then(snap => {
-        if (snap.empty) {
-          setCmsContent([]);
-        } else {
-          setCmsContent(snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
-        }
-      })
-      .catch(() => setCmsContent([]))
-      .finally(() => setCmsLoading(false));
+    const q = query(collection(db, 'homepageContent'), where('isActive', '==', true), orderBy('order', 'asc'));
+    const unsub = onSnapshot(q, snap => {
+      setCmsContent(snap.empty ? [] : snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
+      setCmsLoading(false);
+    }, () => { setCmsContent([]); setCmsLoading(false); });
+    return () => unsub();
   }, []);
 
   // ─── Derived CMS slices ──────────────────────────────────────────────────────
@@ -128,10 +120,26 @@ export default function Home() {
   }, [cmsContent]);
 
   // ─── Product grouping ────────────────────────────────────────────────────────
+  // Smart resolve: if product is in "Others" but name/sub matches a known category, reroute it
+  const resolveCategory = (p: Product): string => {
+    const raw = p.mainCategory || p.category || 'Others';
+    if (raw !== 'Others') return raw;
+    const name = (p.name || '').toLowerCase();
+    const sub = (p.subCategory || '').toLowerCase();
+    const check = name + ' ' + sub;
+    if (check.includes('rabbit') || check.includes('rabit')) return 'Rabbit';
+    if (check.includes('quail') || check.includes('kaadai') || check.includes('kadai')) return 'Quail';
+    if (check.includes('turkey')) return 'Turkey';
+    if (check.includes('duck')) return 'Ducks';
+    if (check.includes('pickle')) return 'Pickles';
+    if (check.includes('masala')) return 'Masala';
+    return raw;
+  };
+
   const grouped = useMemo(() => {
     const map: Record<string, Record<string, Product[]>> = {};
     products.forEach(p => {
-      const main = p.mainCategory || p.category || 'Others';
+      const main = resolveCategory(p);
       const sub = p.subCategory || 'General';
       if (!map[main]) map[main] = {};
       if (!map[main][sub]) map[main][sub] = [];
@@ -147,7 +155,7 @@ export default function Home() {
       {/* ─── PERSONALIZATION TOP ──────────────────────────────────────────────── */}
       <div className="px-1">
         <h1 className="text-2xl font-black text-gray-900 tracking-tight">
-          {user ? `Hey ${user.name ? user.name.split(' ')[0] : 'Balan'} 👋` : 'Welcome to Kari King ✨'}
+          {user ? `Hey ${user.name ? user.name.split(' ')[0] : 'there'} 👋` : 'Welcome to Kari King ✨'}
         </h1>
         <p className="text-gray-500 text-sm font-medium mt-0.5">Let's crave something fresh today.</p>
       </div>
@@ -247,9 +255,9 @@ export default function Home() {
           {[1, 2].map(i => (
             <div key={i} className="space-y-4">
               <div className="h-8 w-40 bg-gray-200 animate-pulse rounded-xl" />
-              <div className="flex gap-4 overflow-hidden">
-                {[1, 2, 3].map(j => (
-                  <div key={j} className="h-72 w-52 shrink-0 bg-gray-100 rounded-[20px] shadow-sm relative overflow-hidden">
+              <div className="product-grid">
+                {[1, 2, 3, 4].map(j => (
+                  <div key={j} className="bg-gray-100 rounded-2xl shadow-sm relative overflow-hidden aspect-[3/4]">
                      <div className="absolute inset-0 -translate-x-full animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
                   </div>
                 ))}
@@ -293,24 +301,8 @@ export default function Home() {
                   </Link>
                 </div>
 
-                {/* Subcategory rows */}
-                <div className="space-y-6">
-                  {(Object.entries(subGroups) as [string, Product[]][]).map(([subName, subProducts]) => (
-                    <div key={subName}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="text-xs font-black text-gray-600 bg-gray-50 px-3 py-1 rounded-full border border-gray-100">{subName}</span>
-                        <div className="h-px flex-1 bg-gray-100" />
-                      </div>
-                      <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-none snap-x -mx-4 px-4">
-                        {subProducts.map(product => (
-                          <div key={product.id} className="snap-start shrink-0 w-[210px]">
-                            <ProductCard product={product} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {/* All products in one grid */}
+                <ProductGrid products={(Object.values(subGroups) as Product[][]).flat()} />
               </motion.section>
             );
           })}

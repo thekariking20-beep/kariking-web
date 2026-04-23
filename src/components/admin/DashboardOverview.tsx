@@ -72,16 +72,25 @@ export default function DashboardOverview({ orders }: DashboardOverviewProps) {
     orders.forEach(order => {
       const orderDate = new Date(order.createdAt);
       const isToday = orderDate >= today;
-      const amount = order.totalAmount || 0;
+      // Revenue should reflect the actual amount paid (finalAmount) after coins discount
+      const amount = order.finalAmount !== undefined ? order.finalAmount : (order.totalAmount || 0);
+
+      const isRevenueEligible = order.status !== 'Cancelled' && order.paymentStatus !== 'failed' && 
+                                (order.paymentStatus === 'paid' || order.paymentStatus === 'pending_verification');
 
       // KPIs
-      totalRevenue += amount;
+      if (isRevenueEligible) {
+        totalRevenue += amount;
+      }
+      
       if (order.status !== 'Delivered' && order.status !== 'Cancelled') {
         pendingCount++;
       }
 
       if (isToday) {
-        todayRevenue += amount;
+        if (isRevenueEligible) {
+          todayRevenue += amount;
+        }
         todayOrdersCount++;
       }
 
@@ -94,7 +103,9 @@ export default function DashboardOverview({ orders }: DashboardOverviewProps) {
       const dateKey = orderDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       if (last7DaysMap.has(dateKey)) {
         const current = last7DaysMap.get(dateKey)!;
-        current.revenue += amount;
+        if (isRevenueEligible) {
+          current.revenue += amount;
+        }
         current.orders += 1;
       }
 

@@ -32,6 +32,7 @@ const COLOR_PRESETS = [
   { label: 'Golden', value: 'from-yellow-500 to-orange-500' },
   { label: 'Purple-Indigo', value: 'from-purple-500 to-indigo-600' },
   { label: 'Green-Emerald', value: 'from-green-500 to-emerald-600' },
+  { label: 'Sky-Blue', value: 'from-sky-400 to-blue-500' },
   { label: 'Pink-Rose', value: 'from-pink-500 to-rose-500' },
 ];
 

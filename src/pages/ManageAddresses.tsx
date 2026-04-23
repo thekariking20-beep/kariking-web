@@ -1,86 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, Plus, MapPin, Trash2, Home, Briefcase, 
   MapPin as OtherIcon, CheckCircle2 
 } from 'lucide-react';
-import { collection, query, onSnapshot, doc, deleteDoc, updateDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
-import { useAuth } from '../context/AuthContext';
-import { UserAddress } from '../types';
+import { useAddress } from '../context/AddressContext';
 import LocationPickerModal from '../components/location/LocationPickerModal';
 import { cn } from '../lib/utils';
 
 export default function ManageAddresses() {
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const [addresses, setAddresses] = useState<UserAddress[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { addresses, loading, setDefaultAddress, saveAddress, deleteAddress, selectedAddress } = useAddress();
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [editingAddress, setEditingAddress] = useState<UserAddress | null>(null);
 
-  // Use onSnapshot to read exactly from addresses/{uid}/userAddresses as requested
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, `addresses/${user.uid}/userAddresses`));
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as UserAddress);
-      setAddresses(data);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
-
-  const handleSetDefault = async (address: UserAddress) => {
-    if (!user) return;
-    // 1. Remove default from others in subcollection
-    for (const a of addresses) {
-      if (a.isDefault && a.id !== address.id) {
-        await updateDoc(doc(db, `addresses/${user.uid}/userAddresses`, a.id), { isDefault: false });
-      }
-    }
-    // 2. Set new default
-    await updateDoc(doc(db, `addresses/${user.uid}/userAddresses`, address.id), { isDefault: true });
-    // 3. Fallback sync to user doc for backwards Cart functionality
-    await updateDoc(doc(db, 'users', user.uid), {
-      address: address.fullAddress,
-      locationLat: address.locationLat || null,
-      locationLng: address.locationLng || null
+  const handleSaveLocation = async (addressString: string, lat?: number, lng?: number, tag?: string) => {
+    await saveAddress({
+      id: Date.now().toString(),
+      tag: (tag as 'home' | 'work' | 'other') || 'home',
+      fullAddress: addressString,
+      locationLat: lat,
+      locationLng: lng,
+      isDefault: addresses.length === 0,
     });
   };
 
   const handleDelete = async (id: string) => {
-    if (!user || !window.confirm('Delete this address?')) return;
-    await deleteDoc(doc(db, `addresses/${user.uid}/userAddresses`, id));
-  };
-
-  const handleSaveLocation = async (addressString: string, lat?: number, lng?: number) => {
-    if (!user) return;
-    try {
-      const refId = editingAddress ? editingAddress.id : Date.now().toString();
-      const isFirst = addresses.length === 0;
-
-      const newAddress: UserAddress = {
-        id: refId,
-        tag: 'home',
-        fullAddress: addressString,
-        locationLat: lat || undefined,
-        locationLng: lng || undefined,
-        isDefault: editingAddress ? editingAddress.isDefault : isFirst,
-        createdAt: new Date().toISOString()
-      };
-
-      await setDoc(doc(db, `addresses/${user.uid}/userAddresses`, refId), newAddress);
-      
-      if (newAddress.isDefault) {
-        await handleSetDefault(newAddress);
-      }
-      
-    } catch (e) {
-      console.error(e);
-      alert('Failed to save address.');
-    }
+    if (!window.confirm('Delete this address?')) return;
+    await deleteAddress(id);
   };
 
   return (
@@ -96,7 +43,7 @@ export default function ManageAddresses() {
       <div className="p-4 space-y-4 max-w-lg mx-auto">
         <motion.button
           whileTap={{ scale: 0.98 }}
-          onClick={() => { setEditingAddress(null); setShowLocationModal(true); }}
+          onClick={() => setShowLocationModal(true)}
           className="w-full bg-white border-2 border-dashed border-[#8B0000]/30 rounded-2xl p-6 flex flex-col items-center justify-center gap-3 text-[#8B0000] hover:bg-red-50/50 transition-colors"
         >
           <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
@@ -118,19 +65,19 @@ export default function ManageAddresses() {
                 key={addr.id}
                 className={cn(
                   "bg-white rounded-2xl p-5 border relative overflow-hidden transition-all shadow-sm",
-                  addr.isDefault ? "border-[#8B0000]/30 shadow-[#8B0000]/5" : "border-gray-100"
+                  addr.id === selectedAddress?.id ? "border-[#8B0000]/30 shadow-[#8B0000]/5" : "border-gray-100"
                 )}
               >
-                {addr.isDefault && (
+                {addr.id === selectedAddress?.id && (
                   <div className="absolute top-0 right-0 py-1 pl-3 pr-4 rounded-bl-2xl bg-[#8B0000] text-white text-[10px] font-black uppercase tracking-widest flex items-center gap-1 shadow-sm">
-                    <CheckCircle2 className="w-3 h-3" /> Default
+                    <CheckCircle2 className="w-3 h-3" /> Selected
                   </div>
                 )}
                 
                 <div className="flex gap-4">
                   <div className={cn(
                     "w-10 h-10 shrink-0 rounded-xl flex items-center justify-center mt-1",
-                    addr.isDefault ? "bg-red-50 text-[#8B0000]" : "bg-gray-50 text-gray-400"
+                    addr.id === selectedAddress?.id ? "bg-red-50 text-[#8B0000]" : "bg-gray-50 text-gray-400"
                   )}>
                     {addr.tag === 'home' ? <Home className="w-5 h-5"/> : addr.tag === 'work' ? <Briefcase className="w-5 h-5"/> : <OtherIcon className="w-5 h-5"/>}
                   </div>
@@ -140,8 +87,8 @@ export default function ManageAddresses() {
                     <p className="text-sm text-gray-500 leading-snug break-words pr-2">{addr.fullAddress}</p>
                     
                     <div className="mt-4 flex gap-3">
-                      {!addr.isDefault && (
-                        <button onClick={() => handleSetDefault(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set Default</button>
+                      {addr.id !== selectedAddress?.id && (
+                        <button onClick={() => setDefaultAddress(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set Selected</button>
                       )}
                     </div>
                   </div>

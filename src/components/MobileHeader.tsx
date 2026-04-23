@@ -3,21 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { MapPin, ChevronDown, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useAddress } from '../context/AddressContext';
 import logoImg from '../assets/kariking-logo.jpg';
 import LocationPickerModal from './location/LocationPickerModal';
 
 export default function MobileHeader() {
   const { user } = useAuth();
+  const { displayLocation, displayCity } = useAddress();
   const navigate = useNavigate();
   const [isLocationOpen, setIsLocationOpen] = useState(false);
-
-  const displayLocation = user?.address
-    ? user.address.split(',')[0].trim()
-    : 'Set Location';
-
-  const displayCity = user?.address
-    ? user.address.split(',').slice(1).join(',').trim() || 'Tamil Nadu'
-    : 'Tap to set address';
 
   return (
     <>

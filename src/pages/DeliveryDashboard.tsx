@@ -6,6 +6,7 @@ import {
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
+import { processReferralReward } from '../lib/referralReward';
 import {
   Package, MapPin, Phone, Truck, CheckCircle2, Navigation,
   User, Zap, LogOut, ShoppingBag, Box, WifiOff, Wifi, PhoneCall, PartyPopper
@@ -115,6 +116,13 @@ export default function DeliveryDashboard() {
         statusHistory: newHistory,
         ...extra
       });
+
+      // Trigger referral reward check when order is delivered
+      if (newStatus === 'Delivered' && order.userId) {
+        processReferralReward(order.userId, order.id).catch(err => 
+          console.error('Referral reward check failed:', err)
+        );
+      }
     } catch (e) {
       console.error(e);
       setErrorToast("Failed to update order. Check internet.");

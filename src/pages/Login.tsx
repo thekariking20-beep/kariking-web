@@ -57,8 +57,12 @@ function OtpInput({ length = 6, value, onChange }: { length?: number; value: str
           value={value[i] || ''}
           onChange={(e) => handleChange(i, e.target.value)}
           onKeyDown={(e) => handleKeyDown(i, e)}
-          className="w-12 h-14 sm:w-14 sm:h-16 text-center text-2xl font-bold rounded-xl border-2 border-gray-200 bg-white outline-none transition-all duration-200 focus:border-[#8B0000] focus:ring-4 focus:ring-[#8B0000]/15 focus:shadow-lg"
-          style={{ fontFamily: 'Poppins, sans-serif' }}
+          className="w-12 h-14 sm:w-14 sm:h-16 text-center text-2xl font-bold rounded-xl border border-white/[0.15] outline-none transition-all duration-300 focus:border-red-500/50 focus:shadow-[0_0_20px_rgba(220,38,38,0.2)] text-white shadow-[0_4px_20px_rgba(0,0,0,0.2)]"
+          style={{ 
+            background: value[i] ? 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.04) 100%)' : 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+            backdropFilter: 'blur(20px)',
+            fontFamily: 'Poppins, sans-serif' 
+          }}
         />
       ))}
     </div>
@@ -687,21 +691,21 @@ export default function Login() {
                     Mobile Number
                   </label>
                   <div 
-                    className={`flex items-center rounded-2xl border overflow-hidden transition-all duration-400 group relative ${
+                    className={`flex items-center rounded-2xl border transition-all duration-400 group relative ${
                       error 
-                        ? "border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.1)]" 
+                        ? "border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.2)]" 
                         : phoneNumber.length === 10 
-                          ? "border-emerald-500/40 shadow-[0_0_25px_rgba(16,185,129,0.1)]" 
-                          : "border-white/[0.06] hover:border-white/[0.12] focus-within:border-red-500/30 focus-within:shadow-[0_0_20px_rgba(139,0,0,0.08)]"
+                          ? "border-emerald-500/50 shadow-[0_0_25px_rgba(16,185,129,0.2)]" 
+                          : "border-white/[0.15] shadow-[0_4px_20px_rgba(0,0,0,0.2)] hover:border-white/[0.25] hover:shadow-[0_4px_25px_rgba(255,255,255,0.02)] focus-within:border-red-500/50 focus-within:shadow-[0_0_20px_rgba(220,38,38,0.15)]"
                     }`}
                     style={{
                       background: phoneNumber.length === 10 
-                        ? 'linear-gradient(135deg, rgba(6,78,40,0.15) 0%, rgba(0,0,0,0.5) 100%)'
-                        : 'linear-gradient(135deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0.4) 100%)',
+                        ? 'linear-gradient(135deg, rgba(6,78,40,0.25) 0%, rgba(0,0,0,0.6) 100%)'
+                        : 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
                       backdropFilter: 'blur(20px)',
                     }}
                   >
-                    <div className="pl-5 pr-3 py-4 text-white/30 font-bold text-base select-none border-r border-white/[0.04] transition-colors group-focus-within:text-white/50">
+                    <div className="pl-5 pr-3 py-4 text-white/50 font-bold text-base select-none border-r border-white/[0.1] transition-colors group-focus-within:text-white/80">
                       +91
                     </div>
                     <input
@@ -711,7 +715,7 @@ export default function Login() {
                       autoFocus
                       placeholder="Enter 10 digit number"
                       maxLength={10}
-                      className="flex-1 px-4 py-4 text-[17px] font-bold text-white bg-transparent outline-none placeholder:text-white/15 placeholder:font-medium tracking-[0.08em]"
+                      className="flex-1 px-4 py-4 text-[17px] font-bold text-white bg-transparent outline-none placeholder:text-white/40 placeholder:font-medium tracking-[0.08em]"
                       value={phoneNumber}
                       onChange={(e) => {
                         setError('');

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { downloadInvoice } from '../lib/invoiceGenerator';
+import { formatQty } from '../lib/units';
+import { PartyPopper } from 'lucide-react';
 
 // ─── Status config ─────────────────────────────────────────────────────────────
 const STATUS_CONFIG = {
@@ -24,16 +26,7 @@ const STATUS_CONFIG = {
 
 const TIMELINE_STEPS = ['Order Placed', 'Order Received', 'Packed', 'Dispatched', 'Delivered'] as const;
 
-function formatQty(qty: number, unit?: string) {
-  if (unit === 'gram') {
-    if (qty >= 1000 && qty % 1000 === 0) return `${qty / 1000}kg`;
-    if (qty >= 1000) return `${(qty / 1000).toFixed(2)}kg`;
-    return `${qty}g`;
-  }
-  if (unit === 'kg') return `${qty}kg`;
-  if (unit === 'piece') return `${qty} pcs`;
-  return `${qty}x`;
-}
+// formatQty imported from lib/units
 
 // ─── Live timeline component ──────────────────────────────────────────────────
 function LiveTimeline({ order }: { order: Order }) {
@@ -125,18 +118,85 @@ export default function Orders() {
   const [orders, setOrders]           = useState<Order[]>([]);
   const [loading, setLoading]         = useState(true);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [processingPaymentFor, setProcessingPaymentFor] = useState<string | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  // Helper to safely load razorpay script
+  const loadRazorpay = async (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if ((window as any).Razorpay) return resolve(true);
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const handleRetryPayment = async (order: Order) => {
+    setProcessingPaymentFor(order.id);
+    try {
+      const loaded = await loadRazorpay();
+      if (!loaded) throw new Error('Razorpay failed to load.');
+
+      const options = {
+        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+        amount: Math.round((order.finalAmount || order.totalAmount) * 100), // convert to paise
+        currency: 'INR',
+        name: 'Kari King',
+        description: `Retry Payment for Order #${order.id.slice(-6).toUpperCase()}`,
+        handler: async function (response: any) {
+          // Success update DB
+          await updateDoc(doc(db, 'orders', order.id), {
+            paymentStatus: 'paid',
+            updatedAt: new Date().toISOString()
+          });
+          setProcessingPaymentFor(null);
+        },
+        prefill: { contact: order.phone },
+        theme: { color: '#7A0000' },
+        modal: {
+          ondismiss: function () {
+            setProcessingPaymentFor(null);
+          }
+        }
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+    } catch (err: any) {
+      console.error(err);
+      setErrorToast(err.message || 'Payment initiation failed.');
+      setTimeout(() => setErrorToast(null), 3000);
+      setProcessingPaymentFor(null);
+    }
+  };
 
   // Real-time listener ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
+    
+    // Performance phase: 
+    // Admins load latest 50 orders automatically natively indexed by createdAt
+    // Users load solely their constraints to bypass rigorous composite indexing requirements
     const q = isAdmin
-      ? query(collection(db, 'orders'), orderBy('createdAt', 'desc'))
-      : query(collection(db, 'orders'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+      ? query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(50))
+      : query(collection(db, 'orders'), where('userId', '==', user.uid));
 
     const unsub = onSnapshot(q, snap => {
-      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
+      const dbOrders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+      
+      // Client-side chronologic sort prevents missing Firebase Index errors for end-users
+      if (!isAdmin) {
+        dbOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      }
+      
+      setOrders(dbOrders);
       setLoading(false);
-    }, err => { console.error(err); setLoading(false); });
+    }, err => { 
+      console.error("Order listener error:", err); 
+      setLoading(false); 
+    });
 
     return () => unsub();
   }, [user, isAdmin]);
@@ -259,6 +319,23 @@ export default function Orders() {
                         <div className="p-5 space-y-6">
                           {/* Live Timeline */}
                           <LiveTimeline order={order} />
+
+                          {/* Retry Payment Banner */}
+                          {order.paymentStatus === 'pending' && order.paymentMethod === 'razorpay' && order.status !== 'Cancelled' && (
+                            <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                              <div>
+                                <p className="text-sm font-bold text-red-800">Pending Payment</p>
+                                <p className="text-xs text-red-600 mt-0.5">Your order is saved, but payment was not completed securely.</p>
+                              </div>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleRetryPayment(order); }}
+                                disabled={processingPaymentFor === order.id}
+                                className="bg-red-600 text-white font-bold py-2 px-5 rounded-lg text-sm whitespace-nowrap shadow-md active:scale-95 transition-all disabled:opacity-50"
+                              >
+                                {processingPaymentFor === order.id ? 'Loading...' : 'Retry Payment'}
+                              </button>
+                            </div>
+                          )}
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             {/* Order items */}

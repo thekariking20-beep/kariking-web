@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapPin, X, Navigation, Home, Briefcase, ChevronRight, Crosshair } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useAddress } from '../../context/AddressContext';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { cn } from '../../lib/utils';
@@ -14,6 +15,7 @@ interface LocationPickerModalProps {
 
 export default function LocationPickerModal({ isOpen, onClose, onSave }: LocationPickerModalProps) {
   const { user, refreshUser } = useAuth();
+  const { saveAddress } = useAddress();
   const [addressLine, setAddressLine] = useState('');
   const [city, setCity] = useState('');
   const [saving, setSaving] = useState(false);
@@ -77,13 +79,15 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
       if (onSave) {
         await onSave(fullAddress, lat, lng, saveAs.toLowerCase());
       } else {
-        await updateDoc(doc(db, 'users', user.uid), {
-          address: fullAddress,
-          locationLat: lat || null,
-          locationLng: lng || null,
-          profileComplete: true 
+        // Save to address subcollection + user doc via AddressContext
+        await saveAddress({
+          id: Date.now().toString(),
+          tag: saveAs.toLowerCase() as 'home' | 'work' | 'other',
+          fullAddress,
+          locationLat: lat,
+          locationLng: lng,
+          isDefault: true,
         });
-        await refreshUser();
       }
       
       onClose();

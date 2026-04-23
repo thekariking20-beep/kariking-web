@@ -62,18 +62,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (fUser) => {
       setFirebaseUser(fUser);
       if (fUser) {
-        // Determine phone number from either phone auth or email-derived staff auth
+        // Determine auth method: email-based = password login; phone-based = OTP login
+        const isPasswordAuth = !!fUser.email?.endsWith('@kariking.staff');
         let phoneNumber = fUser.phoneNumber;
-        if (!phoneNumber && fUser.email?.endsWith('@kariking.staff')) {
-          const match = fUser.email.match(/(\d+)@kariking\.staff$/);
+        if (!phoneNumber && isPasswordAuth) {
+          const match = fUser.email!.match(/(\d+)@kariking\.staff$/);
           if (match) {
-            phoneNumber = `+${match[1]}`;
+            // Strip prefix like 'admin3_' or 'v4_...' if present
+            const digits = match[1];
+            // Take last 12 digits (country code + 10 digit number)
+            phoneNumber = `+${digits.slice(-12)}`;
           }
         }
 
         const userDoc = await getDoc(doc(db, 'users', fUser.uid));
         if (userDoc.exists()) {
-          setUser(userDoc.data() as User);
+          const userData = userDoc.data() as User;
+          
+          // ─── Auth Provider / Role Enforcement ────────────────────
+          // Block: OTP user trying to access staff role without provisioning
+          if (!isPasswordAuth && (userData.role === 'admin' || userData.role === 'manager' || userData.role === 'delivery')) {
+            // Allow if it's the hardcoded admin phone
+            if (userData.phone !== ADMIN_PHONE) {
+              console.warn('Role mismatch: OTP user has staff role but no password auth');
+            }
+          }
+          
+          // Update authProvider if not set
+          if (!userData.authProvider) {
+            const provider = isPasswordAuth ? 'password' : 'otp';
+            await setDoc(doc(db, 'users', fUser.uid), { authProvider: provider }, { merge: true });
+            userData.authProvider = provider;
+          }
+          
+          setUser(userData);
           // Register FCM token in background (non-blocking)
           registerPushNotifications(fUser.uid).catch(() => {});
         } else {
@@ -103,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             uid: fUser.uid,
             phone: phoneNumber || '',
             role: assignedRole,
+            authProvider: isPasswordAuth ? 'password' : 'otp',
             profileComplete: profileComplete,
             referralCode: fUser.uid.slice(0, 6).toUpperCase(),
             coins: 0,
@@ -125,10 +148,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
               await addDoc(collection(db, 'referrals'), {
                 referrerId: referrerDoc.id,
+                referrerPhone: referrerDoc.data().phone || '',
                 referredUserId: fUser.uid,
                 referredUserPhone: phoneNumber || '',
                 status: 'pending',
                 reward: 5,
+                rewardGiven: false,
                 createdAt: new Date().toISOString()
               });
             }
@@ -159,11 +184,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await auth.signOut();
   };
 
-  // 🚀 Hard-locked System Integrity: Only the specific Master Phone Number gains Admin or Dashboard access.
-  const isAdmin = user?.phone === ADMIN_PHONE;
+  // 🚀 Role-based access system
+  const isAdmin = user?.phone === ADMIN_PHONE || user?.role === 'admin';
   const isManager = user?.role === 'manager';
   const isDelivery = user?.role === 'delivery';
-  const isDashboardUser = isAdmin; // Strictly NO others permitted to the admin dashboard
+  const isDashboardUser = isAdmin || isManager; // Admin AND Managers can access dashboard
   const isStaff = isAdmin || isManager || isDelivery;
 
   return (

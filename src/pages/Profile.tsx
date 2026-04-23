@@ -3,12 +3,38 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, MapPin, Bell, CreditCard, Gift, ClipboardList,
-  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Upload
+  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
+import { cn } from '../lib/utils';
+
+interface StatCard {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  gradient: string;
+}
+
+function PremiumAvatar({ gender, size = 'sm' }: { gender?: string, size?: 'sm' | 'lg' }) {
+  const isLg = size === 'lg';
+  const containerClass = cn(
+    "rounded-full bg-gradient-to-br flex items-center justify-center shrink-0 shadow-[0_4px_20px_rgba(139,0,0,0.3)] border-4 border-white",
+    gender === 'female' ? "from-pink-500 to-rose-700 shadow-pink-500/20" :
+    gender === 'male' ? "from-blue-500 to-indigo-700 shadow-blue-500/20" :
+    "from-[#DC2626] to-[#8B0000] shadow-red-600/20",
+    isLg ? "w-24 h-24" : "w-16 h-16 sm:w-20 sm:h-20"
+  );
+  
+  const iconClass = cn("text-white drop-shadow-md", isLg ? "w-12 h-12" : "w-8 h-8 sm:w-10 sm:h-10");
+
+  return (
+    <div className={containerClass}>
+      <User className={iconClass} strokeWidth={2.5} />
+    </div>
+  );
+}
 
 interface StatCard {
   icon: React.ElementType;
@@ -28,8 +54,7 @@ export default function Profile() {
   // Edit Profile States
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState('');
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [editGender, setEditGender] = useState('');
 
   // Real-time Order Count
   useEffect(() => {
@@ -57,6 +82,7 @@ export default function Profile() {
   useEffect(() => {
     if (user && showEditModal) {
       setEditName(user.name || '');
+      setEditGender(user.gender || '');
     }
   }, [showEditModal, user]);
 
@@ -74,27 +100,9 @@ export default function Profile() {
 
   const saveProfile = async () => {
     if (!user) return;
-    await updateDoc(doc(db, 'users', user.uid), { name: editName });
+    await updateDoc(doc(db, 'users', user.uid), { name: editName, gender: editGender });
     await refreshUser();
     setShowEditModal(false);
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
-    
-    setUploadingImage(true);
-    try {
-      const storageRef = ref(storage, `users/${user.uid}/profile_${Date.now()}`);
-      await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(storageRef);
-      await updateDoc(doc(db, 'users', user.uid), { profilePhotoUrl: url });
-    } catch (err) {
-      console.error(err);
-      alert("Failed to upload profile picture. Please try again.");
-    } finally {
-      setUploadingImage(false);
-    }
   };
 
   if (!user) {
@@ -152,18 +160,12 @@ export default function Profile() {
 
         <div className="relative z-10 flex items-center gap-4">
           {/* Avatar */}
-          <div className="w-20 h-20 rounded-full bg-white/15 backdrop-blur-sm border-3 border-white/30 flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.15)] overflow-hidden shrink-0">
-            {user.profilePhotoUrl ? (
-              <img src={user.profilePhotoUrl} alt="Profile" className="w-full h-full object-cover" />
-            ) : (
-              <User className="w-10 h-10 text-white/80" />
-            )}
-          </div>
+          <PremiumAvatar gender={user.gender} size="lg" />
 
           {/* Info */}
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-black text-white truncate drop-shadow-md">
-              {user.name || 'Kari King User'}
+              {user.name || user.phone}
             </h1>
             <p className="text-white/60 text-sm font-medium mt-0.5">{user.phone}</p>
             <div className="flex items-center gap-1.5 mt-2">
@@ -277,36 +279,34 @@ export default function Profile() {
               
               <h2 className="text-xl font-black text-gray-900 mb-6">Edit Profile</h2>
 
-              <div className="flex flex-col items-center mb-6">
-                <div className="relative">
-                  <div className="w-24 h-24 rounded-full bg-gray-100 border-4 border-white shadow-md overflow-hidden flex items-center justify-center">
-                    {uploadingImage ? (
-                      <span className="text-xs font-bold text-gray-400 animate-pulse">Uploading...</span>
-                    ) : user.profilePhotoUrl ? (
-                      <img src={user.profilePhotoUrl} alt="Profile" className="w-full h-full object-cover" />
-                    ) : (
-                      <User className="w-12 h-12 text-gray-400" />
-                    )}
-                  </div>
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploadingImage}
-                    className="absolute bottom-0 right-0 p-2 bg-[#8B0000] text-white rounded-full border-2 border-white shadow-sm hover:scale-105 transition-transform"
-                  >
-                    <Upload className="w-4 h-4" />
-                  </button>
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    className="hidden" 
-                    ref={fileInputRef} 
-                    onChange={handleImageUpload} 
-                  />
-                </div>
-                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-3">Upload Profile Picture</p>
+              <div className="flex flex-col items-center mb-8">
+                <PremiumAvatar gender={editGender} size="lg" />
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-[11px] font-black text-gray-500 uppercase tracking-widest mb-3">Gender</label>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setEditGender('male')}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl font-bold border-2 transition-all flex items-center justify-center gap-2",
+                        editGender === 'male' ? "border-blue-500 bg-blue-50 text-blue-700" : "border-gray-100 bg-gray-50 text-gray-400 hover:bg-gray-100"
+                      )}
+                    >
+                      {editGender === 'male' && <Check className="w-4 h-4" />} Male
+                    </button>
+                    <button
+                      onClick={() => setEditGender('female')}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl font-bold border-2 transition-all flex items-center justify-center gap-2",
+                        editGender === 'female' ? "border-pink-500 bg-pink-50 text-pink-700" : "border-gray-100 bg-gray-50 text-gray-400 hover:bg-gray-100"
+                      )}
+                    >
+                      {editGender === 'female' && <Check className="w-4 h-4" />} Female
+                    </button>
+                  </div>
+                </div>
                 <div>
                   <label className="block text-[11px] font-black text-gray-500 uppercase tracking-widest mb-2">Display Name</label>
                   <input

@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product } from '../types';
 import ProductCard from '../components/ProductCard';
+import ProductGrid from '../components/ProductGrid';
 import { useSearchParams } from 'react-router-dom';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -21,30 +22,38 @@ export default function Products() {
   const currentSub = searchParams.get('sub') || '';
 
   useEffect(() => {
-    const fetchProducts = async () => {
-      setLoading(true);
-      try {
-        const snap = await getDocs(
-          query(collection(db, 'products'), orderBy('createdAt', 'desc'))
-        );
-        setProducts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
-      } catch (error) {
-        console.error('Error fetching products:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchProducts();
+    const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+    const unsub = onSnapshot(q, snap => {
+      setProducts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+      setLoading(false);
+    }, err => { console.error('Error fetching products:', err); setLoading(false); });
+    return () => unsub();
   }, []);
 
   // Determine which subcategories are available for the selected main category
   const activeMainCat = MAIN_CATEGORIES.find(c => c.id === currentCategory);
   const subCategoriesForFilter = activeMainCat?.subCategories ?? [];
 
+  // Smart resolve: reroute miscategorized "Others" products by name
+  const resolveCategory = (p: Product): string => {
+    const raw = p.mainCategory || p.category || '';
+    if (raw !== 'Others') return raw;
+    const check = ((p.name || '') + ' ' + (p.subCategory || '')).toLowerCase();
+    if (check.includes('rabbit') || check.includes('rabit')) return 'Rabbit';
+    if (check.includes('quail') || check.includes('kaadai') || check.includes('kadai')) return 'Quail';
+    if (check.includes('turkey')) return 'Turkey';
+    if (check.includes('duck')) return 'Ducks';
+    if (check.includes('pickle')) return 'Pickles';
+    if (check.includes('masala')) return 'Masala';
+    return raw;
+  };
+
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
+      const resolved = resolveCategory(p);
       const mainMatch =
         currentCategory === 'all' ||
+        resolved === currentCategory ||
         (p.mainCategory || p.category || '') === currentCategory ||
         p.category === currentCategory.toLowerCase();
 
@@ -240,27 +249,13 @@ export default function Products() {
 
       {/* Product grid */}
       {loading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="product-grid">
           {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-            <div key={i} className="bg-gray-100 animate-pulse h-80 rounded-2xl" />
+            <div key={i} className="bg-gray-100 animate-pulse rounded-2xl aspect-[3/4]" />
           ))}
         </div>
       ) : filteredProducts.length > 0 ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <AnimatePresence>
-            {filteredProducts.map((product, i) => (
-              <motion.div
-                key={product.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ delay: i * 0.03 }}
-              >
-                <ProductCard product={product} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+        <ProductGrid products={filteredProducts} />
       ) : (
         <div className="text-center py-20 bg-white rounded-3xl border border-gray-100 shadow-sm">
           <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">

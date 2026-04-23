@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  collection, addDoc, updateDoc, deleteDoc, doc, getDocs,
+  collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot,
   query, orderBy, writeBatch
 } from 'firebase/firestore';
 import { db } from '../../firebase';
@@ -40,19 +40,14 @@ export default function HomepageManager() {
   const [editing, setEditing] = useState<HomepageContent | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
 
-  const fetchItems = async () => {
-    setLoading(true);
-    try {
-      const snap = await getDocs(query(collection(db, 'homepageContent'), orderBy('order', 'asc')));
+  useEffect(() => {
+    const q = query(collection(db, 'homepageContent'), orderBy('order', 'asc'));
+    const unsub = onSnapshot(q, snap => {
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
-    } catch (e) {
-      console.error(e);
-    } finally {
       setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchItems(); }, []);
+    }, err => { console.error(err); setLoading(false); });
+    return () => unsub();
+  }, []);
 
   const resetForm = () => {
     setForm({ ...EMPTY_FORM, order: items.length });
@@ -88,7 +83,7 @@ export default function HomepageManager() {
         await addDoc(collection(db, 'homepageContent'), { ...payload, createdAt: new Date().toISOString() });
       }
       resetForm();
-      fetchItems();
+      // No need to fetch — onSnapshot will auto-update
     } catch (e) {
       console.error(e);
     }
@@ -96,13 +91,13 @@ export default function HomepageManager() {
 
   const toggleActive = async (item: HomepageContent) => {
     await updateDoc(doc(db, 'homepageContent', item.id), { isActive: !item.isActive });
-    setItems(prev => prev.map(i => i.id === item.id ? { ...i, isActive: !i.isActive } : i));
+    // onSnapshot auto-updates
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this content?')) return;
     await deleteDoc(doc(db, 'homepageContent', id));
-    setItems(prev => prev.filter(i => i.id !== id));
+    // onSnapshot auto-updates
   };
 
   const TYPE_COLORS: Record<string, string> = {

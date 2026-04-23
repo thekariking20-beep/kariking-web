@@ -30,6 +30,7 @@ export const MAIN_CATEGORIES: MainCategory[] = [
       { id: 'Country Chicken', label: 'Country Chicken', labelTamil: 'நாட்டு கோழி' },
       { id: 'Broiler Chicken', label: 'Broiler Chicken' },
       { id: 'Skinless Chicken', label: 'Skinless Chicken' },
+      { id: 'Kadaknath Chicken', label: 'Kadaknath Chicken' },
     ],
   },
   {
@@ -81,12 +82,70 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     ],
   },
   {
+    id: 'Milk',
+    label: 'Milk',
+    icon: '🥛',
+    color: 'from-sky-400 to-blue-500',
+    isActive: true,
+    order: 5,
+    subCategories: [
+      { id: 'Cow Milk', label: 'Cow Milk', labelTamil: 'பசும்பால்' },
+      { id: 'Goat Milk', label: 'Goat Milk', labelTamil: 'ஆட்டுப்பால்' },
+    ],
+  },
+  {
+    id: 'Rabbit',
+    label: 'Rabbit',
+    icon: '🐇',
+    color: 'from-stone-500 to-stone-700',
+    isActive: true,
+    order: 5,
+    subCategories: [
+      { id: 'Rabbit Meat', label: 'Rabbit Meat' },
+    ],
+  },
+  {
+    id: 'Quail',
+    label: 'Quail',
+    icon: '🐦',
+    color: 'from-teal-500 to-teal-700',
+    isActive: true,
+    order: 6,
+    subCategories: [
+      { id: 'Quail Meat', label: 'Quail Meat' },
+      { id: 'Quail Eggs', label: 'Quail Eggs' },
+    ],
+  },
+  {
+    id: 'Turkey',
+    label: 'Turkey',
+    icon: '🦃',
+    color: 'from-amber-600 to-amber-800',
+    isActive: true,
+    order: 7,
+    subCategories: [
+      { id: 'Turkey Meat', label: 'Turkey Meat' },
+    ],
+  },
+  {
+    id: 'Ducks',
+    label: 'Ducks',
+    icon: '🦆',
+    color: 'from-emerald-500 to-green-700',
+    isActive: true,
+    order: 8,
+    subCategories: [
+      { id: 'Duck Meat', label: 'Duck Meat' },
+      { id: 'Duck Eggs', label: 'Duck Eggs' },
+    ],
+  },
+  {
     id: 'Masala',
     label: 'Masala Powders',
     icon: '🌶️',
     color: 'from-orange-600 to-red-600',
     isActive: true,
-    order: 5,
+    order: 9,
     subCategories: [
       { id: 'Chicken Masala', label: 'Chicken Masala' },
       { id: 'Mutton Masala', label: 'Mutton Masala' },
@@ -96,12 +155,28 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     ],
   },
   {
+    id: 'Pickles',
+    label: 'Pickles',
+    icon: '🫙',
+    color: 'from-green-600 to-emerald-600',
+    isActive: true,
+    order: 10,
+    subCategories: [
+      { id: 'Chicken Pickle', label: 'Chicken Pickle' },
+      { id: 'Mutton Pickle', label: 'Mutton Pickle' },
+      { id: 'Fish Pickle', label: 'Fish Pickle' },
+      { id: 'Prawn Pickle', label: 'Prawn Pickle' },
+      { id: 'Tomato Pickle', label: 'Tomato Pickle' },
+      { id: 'Mango Pickle', label: 'Mango Pickle' },
+    ],
+  },
+  {
     id: 'Snacks',
     label: 'Snacks',
     icon: '🍟',
     color: 'from-yellow-500 to-orange-500',
     isActive: true,
-    order: 6,
+    order: 11,
     subCategories: [
       { id: 'Chips', label: 'Chips' },
       { id: 'Murukku', label: 'Murukku' },
@@ -116,7 +191,7 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     color: 'from-purple-500 to-indigo-600',
     isActive: true,
     order: 99,
-    subCategories: [], // Handled via custom text input
+    subCategories: [],
   },
 ];
 

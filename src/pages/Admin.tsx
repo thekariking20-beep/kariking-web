@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, getDocs, query, orderBy, where, onSnapshot, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
 import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers } from 'lucide-react';
@@ -13,13 +13,15 @@ import StaffProvisioning from '../components/admin/StaffProvisioning';
 import DriverVerification from '../components/admin/DriverVerification';
 import AdminSettings from '../components/admin/AdminSettings';
 import AdminOrdersTab from '../components/admin/AdminOrdersTab';
+import AdminBookingsTab from '../components/admin/AdminBookingsTab';
 import CategoriesManager from '../components/admin/CategoriesManager';
 import { useCategories } from '../context/CategoriesContext';
 import { useNavigate } from 'react-router-dom';
+import { processReferralReward } from '../lib/referralReward';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories'>('dashboard');
   const { categories: dynamicCategories, getSubCategories: getDynamicSubCategories } = useCategories();
   
   const [products, setProducts] = useState<Product[]>([]);
@@ -48,7 +50,7 @@ export default function Admin() {
     description: '',
     mrpPrice: 0,
     sellingPrice: 0,
-    unitType: 'gram' as 'kg' | 'gram' | 'piece',
+    unitType: 'gram' as 'kg' | 'gram' | 'piece' | 'litre',
     baseWeight: 1000,
     minOrderQty: 500,
     stepSize: 250,
@@ -59,7 +61,7 @@ export default function Admin() {
   const availableSubCategories = getDynamicSubCategories(formData.mainCategory);
   const isOthers = formData.mainCategory === 'Others';
 
-  // Live listener for real-time analytics
+  // Live listener for real-time analytics — orders
   useEffect(() => {
     setLoading(true);
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(orderLimit));
@@ -70,37 +72,50 @@ export default function Admin() {
     return () => unsubscribe();
   }, [orderLimit]);
 
+  // ─── Real-time listeners for ALL admin data ─────────────────────────────────
   useEffect(() => {
-    fetchData();
-  }, [activeTab]);
+    const unsubs: (() => void)[] = [];
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      if (activeTab === 'products') {
-        const productsSnap = await getDocs(query(collection(db, 'products'), orderBy('createdAt', 'desc')));
-        const categoriesSnap = await getDocs(collection(db, 'categories'));
-        setProducts(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
-        setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Category)));
-      } else if (activeTab === 'orders' || activeTab === 'dashboard') {
-        // Orders are handled by onSnapshot above, but we fetch delivery partners here
-        const partnersSnap = await getDocs(query(collection(db, 'users'), where('role', '==', 'delivery')));
-        // Store all partners but filter to available ones for assignment
-        const allPartners = partnersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as User));
-        setDeliveryPartners(allPartners);
-      } else if (activeTab === 'users' && isAdmin) {
-        const usersSnap = await getDocs(query(collection(db, 'users'), orderBy('createdAt', 'desc')));
-        setUsers(usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as unknown as User)));
-      } else if (activeTab === 'referrals' && isAdmin) {
-        const refSnap = await getDocs(query(collection(db, 'referrals'), orderBy('createdAt', 'desc')));
-        setReferrals(refSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Referral)));
-      }
-    } catch (error) {
-      console.error("Error fetching data:", error);
-    } finally {
-      setLoading(false);
+    // Products — always listen (needed for dashboard stats too)
+    unsubs.push(onSnapshot(
+      query(collection(db, 'products'), orderBy('createdAt', 'desc')),
+      snap => setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() } as Product))),
+      err => console.error('Products listener:', err)
+    ));
+
+    // Categories
+    unsubs.push(onSnapshot(
+      collection(db, 'categories'),
+      snap => setCategories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Category))),
+      err => console.error('Categories listener:', err)
+    ));
+
+    // Delivery partners
+    unsubs.push(onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'delivery')),
+      snap => setDeliveryPartners(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as User))),
+      err => console.error('Partners listener:', err)
+    ));
+
+    // Users (admin only)
+    if (isAdmin) {
+      unsubs.push(onSnapshot(
+        query(collection(db, 'users'), orderBy('createdAt', 'desc')),
+        snap => { setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as User))); setLoading(false); },
+        err => console.error('Users listener:', err)
+      ));
+
+      // Referrals (admin only)
+      unsubs.push(onSnapshot(
+        query(collection(db, 'referrals'), orderBy('createdAt', 'desc')),
+        snap => setReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Referral))),
+        err => console.error('Referrals listener:', err)
+      ));
     }
-  };
+
+    setLoading(false);
+    return () => unsubs.forEach(u => u());
+  }, [isAdmin]);
 
   // --- Handlers for Products ---
   const handleProductSubmit = async (e: React.FormEvent) => {
@@ -210,6 +225,13 @@ export default function Admin() {
       const statusHistory = [...order.statusHistory, { status: newStatus, time: new Date().toISOString() }];
       await updateDoc(doc(db, 'orders', orderId), { status: newStatus, statusHistory, updatedAt: new Date().toISOString() });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus, statusHistory } : o));
+      
+      // Trigger referral reward check when order is delivered
+      if (newStatus === 'Delivered' && order.userId) {
+        processReferralReward(order.userId, orderId).catch(err => 
+          console.error('Referral reward check failed:', err)
+        );
+      }
     } catch(err) {
       console.error(err);
     }
@@ -236,6 +258,7 @@ export default function Admin() {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
+    { id: 'bookings', label: 'Bookings', icon: PartyPopper },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'categories', label: 'Categories', icon: Layers },
     { id: 'homepage', label: 'Homepage', icon: Globe },
@@ -404,6 +427,11 @@ export default function Admin() {
                 />
               )}
 
+              {/* BULK BOOKINGS TAB */}
+              {activeTab === 'bookings' && (
+                <AdminBookingsTab />
+              )}
+
               {/* PRODUCTS TAB */}
               {activeTab === 'products' && (
                 <div className="space-y-6">
@@ -505,32 +533,97 @@ export default function Admin() {
                                 {/* Divider */}
                                 <hr className="border-gray-100" />
 
-                                {/* Pricing Section */}
+                                {/* Pricing Section — Smart Unit Pricing */}
                                 <div className="space-y-4">
                                   <div className="flex items-center justify-between">
-                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest">Pricing Strategy</label>
-                                    {formData.mrpPrice > 0 && formData.sellingPrice < formData.mrpPrice && (
+                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest">Smart Pricing</label>
+                                    {formData.mrpPrice > formData.sellingPrice && formData.mrpPrice > 0 && (
                                       <span className="text-[10px] font-black bg-green-100 text-green-700 px-2 py-1 rounded-lg uppercase tracking-wider">
                                         Auto: {Math.round(((formData.mrpPrice - formData.sellingPrice) / formData.mrpPrice) * 100)}% OFF
                                       </span>
                                     )}
                                   </div>
+                                  
+                                  <p className="text-[11px] text-gray-400 -mt-2">Enter price per single unit. Total price auto-calculates from Unit Price × Base Quantity.</p>
+
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div className="relative">
-                                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                        <IndianRupee className="w-4 h-4 text-gray-400" />
+                                    {/* Unit Selling Price — PRIMARY INPUT */}
+                                    <div>
+                                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
+                                        Unit Price (₹ per 1 {formData.unitType === 'gram' ? 'kg' : formData.unitType === 'piece' ? 'pc' : formData.unitType === 'litre' ? 'L' : 'kg'})
+                                      </label>
+                                      <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                          <IndianRupee className="w-4 h-4 text-red-600" />
+                                        </div>
+                                        <input 
+                                          type="number" 
+                                          placeholder="e.g. 10 per egg, 220 per kg" 
+                                          required 
+                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-black text-lg text-gray-900" 
+                                          value={formData.baseWeight > 0 ? (Math.round((formData.sellingPrice / formData.baseWeight) * 100) / 100) || '' : formData.sellingPrice || ''} 
+                                          onChange={(e) => {
+                                            const unitPrice = Number(e.target.value);
+                                            const bw = formData.baseWeight || 1;
+                                            const newSelling = Math.round(unitPrice * bw * 100) / 100;
+                                            // Scale MRP proportionally if it exists
+                                            const currentUnitMrp = formData.mrpPrice > 0 && formData.sellingPrice > 0 
+                                              ? (formData.mrpPrice / formData.sellingPrice) * unitPrice 
+                                              : unitPrice;
+                                            setFormData({ 
+                                              ...formData, 
+                                              sellingPrice: newSelling,
+                                              mrpPrice: Math.round(currentUnitMrp * bw * 100) / 100
+                                            });
+                                          }} 
+                                        />
                                       </div>
-                                      <input type="number" placeholder="Actual Price (MRP)" required className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-medium line-through text-gray-500" value={formData.mrpPrice || ''} onChange={(e) => setFormData({ ...formData, mrpPrice: Number(e.target.value) })} />
                                     </div>
-                                    <div className="relative">
-                                      <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                        <IndianRupee className="w-4 h-4 text-red-600" />
+                                    
+                                    {/* Unit MRP — OPTIONAL */}
+                                    <div>
+                                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
+                                        MRP per unit (optional, for discount)
+                                      </label>
+                                      <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                          <IndianRupee className="w-4 h-4 text-gray-400" />
+                                        </div>
+                                        <input 
+                                          type="number" 
+                                          placeholder="MRP per unit (higher than selling)" 
+                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-medium line-through text-gray-500" 
+                                          value={formData.baseWeight > 0 ? (Math.round((formData.mrpPrice / formData.baseWeight) * 100) / 100) || '' : formData.mrpPrice || ''} 
+                                          onChange={(e) => {
+                                            const unitMrp = Number(e.target.value);
+                                            const bw = formData.baseWeight || 1;
+                                            setFormData({ ...formData, mrpPrice: Math.round(unitMrp * bw * 100) / 100 });
+                                          }} 
+                                        />
                                       </div>
-                                      <input type="number" placeholder="Selling Price" required className={cn("w-full py-4 pr-4 pl-12 border rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 transition-all outline-none font-bold text-gray-900", formData.sellingPrice > formData.mrpPrice ? "border-red-500 focus:ring-red-500/10 focus:border-red-500" : "border-gray-200 focus:ring-green-600/10 focus:border-green-600")} value={formData.sellingPrice || ''} onChange={(e) => setFormData({ ...formData, sellingPrice: Number(e.target.value) })} />
                                     </div>
                                   </div>
-                                  {formData.sellingPrice > formData.mrpPrice && (
-                                    <p className="text-xs font-semibold text-red-500 mt-1">Selling price cannot exceed MRP.</p>
+
+                                  {/* Auto-calculated total prices */}
+                                  {formData.sellingPrice > 0 && (
+                                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
+                                      <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 mb-0.5">Auto-Calculated Total</p>
+                                        <p className="text-sm font-black text-emerald-900">
+                                          Selling: ₹{formData.sellingPrice}
+                                          {formData.mrpPrice > formData.sellingPrice && (
+                                            <span className="text-gray-400 font-medium line-through ml-2">MRP: ₹{formData.mrpPrice}</span>
+                                          )}
+                                        </p>
+                                      </div>
+                                      <div className="text-right">
+                                        <p className="text-[10px] text-emerald-600">for {formData.baseWeight} {formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</p>
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  {formData.sellingPrice > formData.mrpPrice && formData.mrpPrice > 0 && (
+                                    <p className="text-xs font-semibold text-red-500 mt-1">⚠️ MRP per unit must be ≥ selling price per unit.</p>
                                   )}
                                 </div>
 
@@ -554,35 +647,68 @@ export default function Admin() {
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Unit Type</label>
-                                      <select className="w-full p-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-red-600/20 focus:border-red-600 outline-none text-sm font-medium" value={formData.unitType} onChange={(e) => setFormData({ ...formData, unitType: e.target.value as any })}>
-                                        <option value="gram">Gram (g)</option>
+                                      <select className="w-full p-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-red-600/20 focus:border-red-600 outline-none text-sm font-medium" value={formData.unitType} onChange={(e) => {
+                                        const ut = e.target.value as any;
+                                        const defaults = ut === 'gram' ? { baseWeight: 1000, minOrderQty: 500, stepSize: 250 } 
+                                          : ut === 'piece' ? { baseWeight: 1, minOrderQty: 1, stepSize: 1 }
+                                          : ut === 'litre' ? { baseWeight: 1, minOrderQty: 1, stepSize: 1 }
+                                          : { baseWeight: 1, minOrderQty: 1, stepSize: 1 };
+                                        // Preserve unit price when switching type
+                                        const oldBw = formData.baseWeight || 1;
+                                        const unitPrice = formData.sellingPrice / oldBw;
+                                        const unitMrp = formData.mrpPrice / oldBw;
+                                        const newBw = defaults.baseWeight;
+                                        setFormData({ 
+                                          ...formData, unitType: ut, ...defaults,
+                                          sellingPrice: Math.round(unitPrice * newBw * 100) / 100,
+                                          mrpPrice: Math.round(unitMrp * newBw * 100) / 100,
+                                        });
+                                      }}>
+                                        <option value="gram">Gram (g) — Meats, Fish</option>
                                         <option value="kg">Kilogram (kg)</option>
-                                        <option value="piece">Piece (pcs)</option>
+                                        <option value="piece">Piece (pcs) — Eggs, Items</option>
+                                        <option value="litre">Litre (L) — Milk, Liquids</option>
                                       </select>
                                     </div>
                                     <div>
-                                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Base Weight (Price per)</label>
+                                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+                                        {formData.unitType === 'piece' ? 'Default Quantity (e.g. 12 eggs)' : formData.unitType === 'gram' ? 'Base Weight (grams)' : 'Base Quantity'}
+                                      </label>
                                       <div className="flex bg-white rounded-xl overflow-hidden border border-gray-200 focus-within:ring-2 focus-within:ring-red-600/20 focus-within:border-red-600 transition-all">
-                                        <input type="number" required placeholder="1000" className="w-full p-3 outline-none text-sm font-medium" value={formData.baseWeight} onChange={(e) => setFormData({ ...formData, baseWeight: Number(e.target.value) })} />
-                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType}</div>
+                                        <input type="number" required placeholder={formData.unitType === 'gram' ? '1000' : '1'} className="w-full p-3 outline-none text-sm font-medium" value={formData.baseWeight} onChange={(e) => {
+                                          const newBw = Number(e.target.value);
+                                          if (newBw <= 0) { setFormData({ ...formData, baseWeight: newBw }); return; }
+                                          // Preserve unit price when changing base weight
+                                          const oldBw = formData.baseWeight || 1;
+                                          const unitPrice = formData.sellingPrice / oldBw;
+                                          const unitMrp = formData.mrpPrice / oldBw;
+                                          setFormData({ 
+                                            ...formData, 
+                                            baseWeight: newBw,
+                                            sellingPrice: Math.round(unitPrice * newBw * 100) / 100,
+                                            mrpPrice: Math.round(unitMrp * newBw * 100) / 100,
+                                          });
+                                        }} />
+                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</div>
                                       </div>
                                     </div>
                                     <div>
-                                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Minimum Order</label>
+                                      <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Min Order Qty</label>
                                       <div className="flex bg-white rounded-xl overflow-hidden border border-gray-200 focus-within:ring-2 focus-within:ring-red-600/20 focus-within:border-red-600 transition-all">
-                                        <input type="number" required placeholder="500" className="w-full p-3 outline-none text-sm font-medium" value={formData.minOrderQty} onChange={(e) => setFormData({ ...formData, minOrderQty: Number(e.target.value) })} />
-                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType}</div>
+                                        <input type="number" required placeholder={formData.unitType === 'gram' ? '500' : '1'} className="w-full p-3 outline-none text-sm font-medium" value={formData.minOrderQty} onChange={(e) => setFormData({ ...formData, minOrderQty: Number(e.target.value) })} />
+                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</div>
                                       </div>
                                     </div>
                                     <div>
                                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Step Size (+/- jumps)</label>
                                       <div className="flex bg-white rounded-xl overflow-hidden border border-gray-200 focus-within:ring-2 focus-within:ring-red-600/20 focus-within:border-red-600 transition-all">
-                                        <input type="number" required placeholder="250" className="w-full p-3 outline-none text-sm font-medium" value={formData.stepSize} onChange={(e) => setFormData({ ...formData, stepSize: Number(e.target.value) })} />
-                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType}</div>
+                                        <input type="number" required placeholder={formData.unitType === 'gram' ? '250' : '1'} className="w-full p-3 outline-none text-sm font-medium" value={formData.stepSize} onChange={(e) => setFormData({ ...formData, stepSize: Number(e.target.value) })} />
+                                        <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</div>
                                       </div>
                                     </div>
                                   </div>
                                 </div>
+
                              </div>
 
                              {/* RIGHT COLUMN: IMAGE UPLOAD */}
@@ -721,40 +847,116 @@ export default function Admin() {
 
               {/* REFERRALS TAB */}
               {activeTab === 'referrals' && isAdmin && (
-                <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Referrer (UID)</th>
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Friend (Phone)</th>
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Date</th>
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                       {referrals.map(r => (
-                        <tr key={r.id} className="hover:bg-gray-50">
-                          <td className="p-4">
-                            <p className="font-bold text-gray-900 text-xs">{r.referrerId}</p>
-                          </td>
-                          <td className="p-4">
-                            <p className="font-medium text-gray-900">{r.referredUserPhone || 'Unknown'}</p>
-                          </td>
-                          <td className="p-4 text-xs text-gray-500">
-                            {new Date(r.createdAt).toLocaleString()}
-                          </td>
-                          <td className="p-4 text-right">
-                             <span className={cn(
-                                "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                r.status === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
-                             )}>
-                               {r.status}
-                             </span>
-                          </td>
+                <div className="space-y-6">
+                  {/* Referral Stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total Referrals</p>
+                      <p className="text-3xl font-black text-gray-900 mt-1">{referrals.length}</p>
+                    </div>
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Completed</p>
+                      <p className="text-3xl font-black text-green-600 mt-1">{referrals.filter(r => r.status === 'completed').length}</p>
+                    </div>
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Pending</p>
+                      <p className="text-3xl font-black text-yellow-600 mt-1">{referrals.filter(r => r.status === 'pending').length}</p>
+                    </div>
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">Total Coins Given</p>
+                      <p className="text-3xl font-black text-blue-600 mt-1">{referrals.filter(r => r.status === 'completed').length * 5}</p>
+                    </div>
+                  </div>
+
+                  {/* Search & Filter */}
+                  <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row gap-3">
+                    <input
+                      type="text"
+                      placeholder="Search by phone, referrer ID..."
+                      className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                      id="referral-search"
+                      onChange={(e) => {
+                        const search = e.target.value.toLowerCase();
+                        const rows = document.querySelectorAll('[data-referral-row]');
+                        rows.forEach(row => {
+                          const text = row.textContent?.toLowerCase() || '';
+                          (row as HTMLElement).style.display = text.includes(search) ? '' : 'none';
+                        });
+                      }}
+                    />
+                    <select
+                      className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                      onChange={(e) => {
+                        const filter = e.target.value;
+                        const rows = document.querySelectorAll('[data-referral-row]');
+                        rows.forEach(row => {
+                          const status = row.getAttribute('data-status') || '';
+                          (row as HTMLElement).style.display = filter === 'all' || status === filter ? '' : 'none';
+                        });
+                      }}
+                    >
+                      <option value="all">All Status</option>
+                      <option value="pending">Pending Only</option>
+                      <option value="completed">Completed Only</option>
+                    </select>
+                  </div>
+
+                  {/* Referrals Table */}
+                  <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Referrer</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Friend (Phone)</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Date</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Reward</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Status</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {referrals.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="p-12 text-center text-gray-400">No referrals yet.</td>
+                          </tr>
+                        ) : referrals.map(r => {
+                          // Try to find referrer user details
+                          const referrerUser = users.find(u => u.uid === r.referrerId);
+                          return (
+                            <tr key={r.id} className="hover:bg-gray-50" data-referral-row data-status={r.status}>
+                              <td className="p-4">
+                                <p className="font-bold text-gray-900 text-sm">{referrerUser?.name || r.referrerPhone || 'Unknown'}</p>
+                                <p className="text-[10px] text-gray-400 font-mono mt-0.5">{r.referrerId.slice(0, 8)}...</p>
+                                {(referrerUser?.phone || r.referrerPhone) && (
+                                  <p className="text-xs text-gray-500 mt-0.5">{referrerUser?.phone || r.referrerPhone}</p>
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <p className="font-medium text-gray-900">{r.referredUserPhone || 'Unknown'}</p>
+                              </td>
+                              <td className="p-4 text-xs text-gray-500">
+                                {new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {r.completedAt && (
+                                  <p className="text-green-600 text-[10px] mt-0.5">Completed: {new Date(r.completedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <span className="text-sm font-bold text-gray-700">{r.reward} coins</span>
+                                {r.rewardGiven && <span className="text-[10px] text-green-600 block">✓ Given</span>}
+                              </td>
+                              <td className="p-4 text-right">
+                                <span className={cn(
+                                  "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                  r.status === 'completed' ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"
+                                )}>
+                                  {r.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 

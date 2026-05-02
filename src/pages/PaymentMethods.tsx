@@ -8,7 +8,7 @@ type PaymentMethodType = 'upi' | 'card';
 
 export default function PaymentMethods() {
   const navigate = useNavigate();
-  // Simply mock local state for now until Razorpay is integrated. Phase 7: Show UI only.
+  // Display-only payment method preference selector.
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethodType>('upi');
 
   const methods = [
@@ -39,7 +39,7 @@ export default function PaymentMethods() {
 
       <div className="p-4 max-w-lg mx-auto space-y-6 mt-2">
         <div className="bg-blue-50 text-blue-800 p-4 rounded-2xl border border-blue-100/50 text-sm font-bold leading-relaxed shadow-sm">
-          Select your preferred default payment method for faster checkout. (Real payments via Razorpay will be activated soon).
+          Select your preferred default payment method for faster checkout. All payments are verified via UPI QR + UTR.
         </div>
 
         <div className="space-y-3">

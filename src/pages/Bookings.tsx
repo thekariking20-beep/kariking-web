@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Package, Calendar, MapPin, Users, AlertCircle, Check, X, ClipboardList, Clock, ChevronRight, CheckCircle2, XCircle, CreditCard, Scale, Navigation, IndianRupee, Ban, MessageSquare } from 'lucide-react';
+import { Package, Calendar, MapPin, Users, AlertCircle, Check, X, ClipboardList, Clock, ChevronRight, CheckCircle2, XCircle, CreditCard, Scale, Navigation, IndianRupee, Ban, MessageSquare, QrCode } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { collection, addDoc, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
@@ -174,60 +174,44 @@ export default function Bookings() {
   const hasErrors = Object.keys(formErrors).length > 0;
   // ─── Payment Handler ────────────────────────────────────────────────────
   const [processingPaymentFor, setProcessingPaymentFor] = useState<string | null>(null);
+  const [showAdvanceQr, setShowAdvanceQr] = useState<BulkBooking | null>(null);
+  const [advanceUtr, setAdvanceUtr] = useState('');
+  const [advanceUtrError, setAdvanceUtrError] = useState('');
 
-  const loadRazorpay = async (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if ((window as any).Razorpay) return resolve(true);
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
+  const UPI_ID = 'balanr454-1@okhdfcbank';
+  const UPI_NAME = 'KARI KING';
+
+  const handleAdvancePayment = (booking: BulkBooking) => {
+    if (!booking.advanceAmount || booking.advanceAmount <= 0) return;
+    setShowAdvanceQr(booking);
+    setAdvanceUtr('');
+    setAdvanceUtrError('');
   };
 
-  const handleAdvancePayment = async (booking: BulkBooking) => {
-    if (!booking.advanceAmount || booking.advanceAmount <= 0) return;
-    
-    setProcessingPaymentFor(booking.id);
+  const handleSubmitAdvanceUtr = async () => {
+    if (!showAdvanceQr) return;
+    const trimmed = advanceUtr.trim();
+    if (!/^\d{12}$/.test(trimmed)) {
+      setAdvanceUtrError('UTR must be exactly 12 digits');
+      return;
+    }
+    setProcessingPaymentFor(showAdvanceQr.id);
     try {
-      const loaded = await loadRazorpay();
-      if (!loaded) throw new Error('Razorpay failed to load.');
-
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-        amount: Math.round(booking.advanceAmount * 100), // convert to paise
-        currency: 'INR',
-        name: 'Kari King',
-        description: `Advance Payment for Request #${booking.id.slice(-5).toUpperCase()}`,
-        handler: async function (response: any) {
-          // Success update DB
-          await updateDoc(doc(db, 'bulkBookings', booking.id), {
-            advancePaid: true,
-            status: 'confirmed',
-            paymentStatus: 'paid',
-            paymentMethod: 'razorpay',
-            advancePaidAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            razorpayPaymentId: response.razorpay_payment_id
-          });
-          setProcessingPaymentFor(null);
-          alert("Advance payment successful! Order Confirmed.");
-        },
-        prefill: { contact: user?.phone || booking.userPhone },
-        theme: { color: '#8B0000' },
-        modal: {
-          ondismiss: function () {
-            setProcessingPaymentFor(null);
-          }
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
+      await updateDoc(doc(db, 'bulkBookings', showAdvanceQr.id), {
+        advancePaid: true,
+        status: 'confirmed',
+        paymentStatus: 'paid',
+        paymentMethod: 'qr',
+        utrNumber: trimmed,
+        advancePaidAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      setShowAdvanceQr(null);
+      setAdvanceUtr('');
     } catch (err: any) {
-      console.error("Payment failed", err);
-      alert(err.message || 'Payment initiation failed.');
+      console.error('UTR submit failed', err);
+      setAdvanceUtrError('Failed to submit. Please try again.');
+    } finally {
       setProcessingPaymentFor(null);
     }
   };
@@ -568,6 +552,54 @@ export default function Bookings() {
             })
           )}
         </motion.div>
+      )}
+
+      {/* ─── Advance Payment QR Modal ────────────────────────────── */}
+      {showAdvanceQr && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl max-w-[380px] w-full p-6 shadow-2xl relative">
+            <button onClick={() => setShowAdvanceQr(null)} className="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100">
+              <X className="w-5 h-5 text-gray-400" />
+            </button>
+            <div className="text-center mb-4">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-100 flex items-center justify-center mb-3">
+                <QrCode className="w-7 h-7 text-blue-600" />
+              </div>
+              <h3 className="text-xl font-black text-gray-900">Pay Advance</h3>
+              <p className="text-sm text-gray-500 mt-1">Scan & pay ₹{showAdvanceQr.advanceAmount?.toLocaleString()} via UPI</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 mb-4 flex items-center justify-center border-2 border-gray-100 shadow-inner">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${showAdvanceQr.advanceAmount}&cu=INR&tn=KariKing_Advance_${showAdvanceQr.id.slice(-5)}`)}`}
+                alt="UPI QR Code"
+                className="w-[220px] h-[220px] rounded-xl object-contain"
+              />
+            </div>
+            <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4 text-center">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-widest">Advance Amount</p>
+              <p className="text-2xl font-black text-green-700 my-1">₹{showAdvanceQr.advanceAmount?.toLocaleString()}</p>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Enter 12-digit UTR number"
+                value={advanceUtr}
+                onChange={(e) => { setAdvanceUtr(e.target.value.replace(/\D/g, '')); setAdvanceUtrError(''); }}
+                maxLength={12}
+                className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium text-sm text-center tracking-widest"
+              />
+              {advanceUtrError && <p className="text-[10px] text-red-600 font-bold text-center">{advanceUtrError}</p>}
+              <button
+                onClick={handleSubmitAdvanceUtr}
+                disabled={processingPaymentFor === showAdvanceQr.id || advanceUtr.length !== 12}
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 active:scale-95 transition-all"
+              >
+                {processingPaymentFor === showAdvanceQr.id ? 'Submitting...' : 'Confirm Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

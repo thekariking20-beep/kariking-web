@@ -121,7 +121,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       });
 
       if (tokens.length > 0) {
-        const payLabels = { razorpay: "Razorpay", qr: "UPI QR", coins: "Coins" };
+        const payLabels = { qr: "UPI QR", coins: "Coins" };
         const payLabel = payLabels[after.paymentMethod] || after.paymentMethod;
         const messages = tokens.map((token) => ({
           token,

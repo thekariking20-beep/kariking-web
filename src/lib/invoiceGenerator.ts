@@ -105,10 +105,8 @@ export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   const paymentLabels: Record<string, string> = {
-    razorpay: 'Razorpay (Online)',
     qr: 'UPI QR Payment',
     coins: 'Kari Coins',
-    cod: 'Cash on Delivery'
   };
   doc.text(paymentLabels[order.paymentMethod] || order.paymentMethod, col1, y + 33);
 

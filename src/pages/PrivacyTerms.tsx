@@ -116,7 +116,7 @@ export default function PrivacyTerms() {
               <p><strong>Personal Information:</strong> When you create an account, we collect your mobile phone number for OTP-based authentication. During profile setup, we may collect your name and delivery address.</p>
               <p><strong>Location Data:</strong> We collect your delivery address coordinates only when you explicitly save a delivery location — used solely to facilitate accurate doorstep delivery and calculate delivery fees.</p>
               <p><strong>Order Data:</strong> We store your order history, items purchased, payment method used, and delivery details to provide order tracking and customer support.</p>
-              <p><strong>Payment Information:</strong> We do <strong>not</strong> store your credit card, debit card, or UPI details. All online payments are processed securely through Razorpay, which is PCI-DSS compliant.</p>
+              <p><strong>Payment Information:</strong> We do <strong>not</strong> store your credit card, debit card, or UPI details. All payments are processed via direct UPI QR code scanning. Your UTR (transaction reference) is stored solely for payment verification purposes.</p>
               <p><strong>Device Information:</strong> We may collect device type, browser version, and push notification tokens (FCM) to send order status updates.</p>
             </Section>
 
@@ -138,7 +138,7 @@ export default function PrivacyTerms() {
               <p>We share your data only in these limited cases:</p>
               <ul className="list-disc pl-5 space-y-1.5">
                 <li><strong>Delivery Partners:</strong> Your name, phone number, and delivery address are shared with assigned delivery personnel to complete your delivery.</li>
-                <li><strong>Payment Processors:</strong> Razorpay receives payment-related data and is independently responsible for its security under PCI-DSS standards.</li>
+                <li><strong>Payment Verification:</strong> Your UTR (transaction reference number) is stored to verify UPI payments. No sensitive payment credentials are retained.</li>
                 <li><strong>Legal Compliance:</strong> We may disclose data if required by Indian law, regulation, or court order.</li>
               </ul>
             </Section>
@@ -229,8 +229,7 @@ export default function PrivacyTerms() {
             <Section number="4" title="Payment Terms">
               <p>Kari King supports the following payment methods:</p>
               <ul className="list-disc pl-5 space-y-1.5">
-                <li><strong>Razorpay (Online):</strong> Instant payment via UPI, cards, and net banking. Processed securely by Razorpay.</li>
-                <li><strong>UPI QR Payment:</strong> Scan the QR code and pay. Payment is manually verified by our team before order confirmation.</li>
+                <li><strong>UPI QR Payment:</strong> Scan the QR code and pay via any UPI app (GPay, PhonePe, Paytm). Submit your 12-digit UTR for manual verification by our team.</li>
                 <li><strong>Kari Coins:</strong> Use earned loyalty coins (1 coin = ₹20 value) to partially or fully pay for orders.</li>
               </ul>
               <p className="font-bold text-gray-700">Cash on Delivery (COD) is NOT available.</p>

@@ -166,7 +166,7 @@ export interface BulkBooking {
   quotedPrice?: number;         // Set by admin dynamically
   advanceAmount?: number;       // 50% of quotedPrice
   balanceAmount?: number;       // 50% remaining
-  advancePaid: boolean;         // Tracking Razorpay completion
+  advancePaid: boolean;         // Tracking UPI payment completion
 
   // Dates, Times & Locations
   requiredDate: string;
@@ -178,7 +178,7 @@ export interface BulkBooking {
   // Status
   status: BulkBookingStatus;
   paymentStatus: BulkPaymentStatus;
-  paymentMethod?: 'qr' | 'razorpay';
+  paymentMethod?: 'qr';
 
   // Timestamps
   createdAt: string;

@@ -121,7 +121,7 @@ export default function Cart() {
 
 
       if (effectiveMethod === 'qr' && data.finalAmount > 0) {
-        // Show QR modal — order already created with pending_verification
+        // Show QR modal — order already created with awaiting_payment status
         setQrOrderId(data.orderId);
         setShowQrModal(true);
         setLoading(false);

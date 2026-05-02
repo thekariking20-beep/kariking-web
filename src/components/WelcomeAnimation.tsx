@@ -155,17 +155,18 @@ class Rocket {
 }
 
 export default function WelcomeAnimation() {
-  const [show, setShow] = useState(false);
+  // Initialize synchronously to true if they haven't seen it, preventing a 1-frame layout blink
+  const [show, setShow] = useState(() => localStorage.getItem('hasSeenWelcome') !== 'true');
   const [step, setStep] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // ─── SINGLE ENTRY POINT: check localStorage, show overlay, start timeline ───
   useEffect(() => {
-    if (localStorage.getItem('hasSeenWelcome') === 'true') return;
-
-    // Show immediately — no delay to prevent white flash gap
-    setShow(true);
+    if (localStorage.getItem('hasSeenWelcome') === 'true') {
+      setShow(false);
+      return;
+    }
 
     // Timeline steps
     const t1 = setTimeout(() => setStep(1), 500);

@@ -153,7 +153,22 @@ export default function Home() {
     return map as Record<string, Record<string, Product[]>>;
   }, [products, MAIN_CATEGORIES]);
 
-  const activeMains = MAIN_CATEGORIES.filter(cat => grouped[cat.id]);
+  const activeMains = useMemo(() => {
+    const mains: any[] = [];
+    Object.keys(grouped).forEach(mainId => {
+      // Find category config if it exists, otherwise create a fallback
+      const catConfig = MAIN_CATEGORIES.find(c => c.id === mainId) || {
+        id: mainId,
+        label: mainId,
+        icon: '📦',
+        color: 'from-gray-500 to-gray-600',
+        order: 999
+      };
+      mains.push(catConfig);
+    });
+    // Sort by order
+    return mains.sort((a, b) => (a.order || 99) - (b.order || 99));
+  }, [grouped, MAIN_CATEGORIES]);
 
   return (
     <div className="space-y-8">
@@ -206,7 +221,7 @@ export default function Home() {
       <section>
         <h2 className="text-xl font-black text-gray-900 mb-4">Shop by Category</h2>
         <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
-          {MAIN_CATEGORIES.map((cat, i) => (
+          {activeMains.map((cat, i) => (
             <motion.div key={cat.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
               <Link
                 to={`/products?category=${cat.id}`}

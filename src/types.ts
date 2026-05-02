@@ -216,6 +216,7 @@ export interface Order {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
+  utrNumber?: string;
   // ─── Order Details ────────────────────────────────────────────────
   status: 'Order Placed' | 'Order Received' | 'Packed' | 'Dispatched' | 'Delivered' | 'Cancelled';
   statusHistory: StatusUpdate[];

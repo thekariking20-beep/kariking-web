@@ -212,7 +212,7 @@ exports.createOrder = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "User must be logged in to order.");
   }
 
-  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins } = request.data;
+  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, utrNumber } = request.data;
   
   if (!items || !items.length || !address || !phone) {
     throw new HttpsError("invalid-argument", "Missing required fields.");
@@ -314,6 +314,7 @@ exports.createOrder = onCall(async (request) => {
     pendingCoinsDeduction: paymentMethod === 'qr' ? coinsUsed : 0, // Track for QR verification
     discountAmount,
     deliveryCharge: deliveryFee || 0,
+    utrNumber: utrNumber || null,
     createdAt: now,
     updatedAt: now,
   };

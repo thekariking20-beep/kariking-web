@@ -18,8 +18,8 @@ import LocationPickerModal from '../components/location/LocationPickerModal';
 import { checkOrderLimit } from '../lib/rateLimit';
 
 // ─── UPI QR Payment Config ───────────────────────────────────────────────
-const UPI_ID = 'kariking@upi'; // Replace with actual UPI ID
-const UPI_NAME = 'Kari King';
+const UPI_ID = '45105944505@sbi'; 
+const UPI_NAME = 'KARIKING';
 
 // Static QR code image — drop your bank QR image at: src/assets/upi-qr.png
 // Then uncomment the import below:
@@ -41,9 +41,12 @@ export default function Cart() {
   const [useCoins, setUseCoins] = useState(false);
   const [error, setError] = useState('');
   const [isLocationOpen, setIsLocationOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<Order['paymentMethod']>('razorpay');
+  const [paymentMethod, setPaymentMethod] = useState<Order['paymentMethod']>('qr');
   const [showQrModal, setShowQrModal] = useState(false);
   const [qrOrderId, setQrOrderId] = useState('');
+  const [utrInput, setUtrInput] = useState('');
+  const [utrError, setUtrError] = useState('');
+  const [loadingVerify, setLoadingVerify] = useState(false);
 
   const { width, height } = useWindowSize();
 
@@ -59,58 +62,9 @@ export default function Cart() {
 
   // formatQty imported from lib/units
 
-  // ─── Razorpay Integration ──────────────────────────────────────────────
-  const loadRazorpay = useCallback((): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if ((window as any).Razorpay) {
-        resolve(true);
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  }, []);
+  // ─── Direct UPI Payment Architecture ──────────────────────────────────
+  // Razorpay has been removed. All payments are verified via UTR on direct UPI.
 
-  const handleRazorpayPayment = async (orderId: string, amount: number) => {
-    const loaded = await loadRazorpay();
-    if (!loaded) {
-      setError('Failed to load payment gateway. Please try again.');
-      return false;
-    }
-
-    return new Promise<boolean>((resolve) => {
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-        amount: Math.round(amount * 100), // Razorpay expects paise
-        currency: 'INR',
-        name: 'Kari King',
-        description: `Order #${orderId.slice(-6).toUpperCase()}`,
-        order_id: undefined, // Set this if using server-side order creation
-        handler: function (response: any) {
-          // Payment successful
-          console.log('Razorpay Payment:', response);
-          resolve(true);
-        },
-        prefill: {
-          contact: phone,
-        },
-        theme: {
-          color: '#7A0000',
-        },
-        modal: {
-          ondismiss: function () {
-            resolve(false);
-          }
-        }
-      };
-
-      const razorpay = new (window as any).Razorpay(options);
-      razorpay.open();
-    });
-  };
 
   // ─── Core Checkout Handler ──────────────────────────────────────────────
   const handleCheckout = async () => {
@@ -160,22 +114,8 @@ export default function Cart() {
         throw new Error("Backend checkout failed.");
       }
 
-      if (effectiveMethod === 'razorpay' && data.finalAmount > 0) {
-        const paid = await handleRazorpayPayment(data.orderId, data.finalAmount);
-        if (!paid) {
-          setError('Payment was cancelled. Your order has been securely saved — you can retry payment from the Orders page.');
-          setLoading(false);
-          // Wait briefly, then redirect them to orders so they can see the pending order and retry
-          setTimeout(() => navigate('/orders'), 2500);
-          return;
-        }
+      // Direct UPI / QR Flow
 
-        // Razorpay payment was successful! Wait for client-side confirmation then update DB
-        await updateDoc(doc(db, 'orders', data.orderId), {
-          paymentStatus: 'paid',
-          updatedAt: new Date().toISOString()
-        });
-      }
 
       if (effectiveMethod === 'qr' && data.finalAmount > 0) {
         // Show QR modal — order already created with pending_verification
@@ -186,13 +126,15 @@ export default function Cart() {
         return;
       }
 
-      // Success — coins-only or razorpay completed
-      await refreshUser();
-      clearCart();
-      setOrderPlaced(true);
-      setTimeout(() => {
-        navigate('/orders');
-      }, 3000);
+      // Success — coins-only completed (if amount was 0)
+      if (effectiveMethod === 'coins' || data.finalAmount === 0) {
+        await refreshUser();
+        clearCart();
+        setOrderPlaced(true);
+        setTimeout(() => {
+          navigate('/orders');
+        }, 3000);
+      }
     } catch (err: any) {
       console.error(err);
       setError('Failed to place order. Please try again.');
@@ -203,13 +145,34 @@ export default function Cart() {
 
   // ─── QR "I Have Paid" Handler ──────────────────────────────────────────
   const handleQrConfirm = async () => {
-    setShowQrModal(false);
-    await refreshUser();
-    clearCart();
-    setOrderPlaced(true);
-    setTimeout(() => {
-      navigate('/orders');
-    }, 3000);
+    if (!utrInput || utrInput.trim().length < 8) {
+      setUtrError("Please enter a valid UTR / Transaction ID (usually 12 digits)");
+      return;
+    }
+    
+    setLoadingVerify(true);
+    setUtrError('');
+    
+    try {
+      // Save UTR to the already created order
+      await updateDoc(doc(db, 'orders', qrOrderId), {
+        utrNumber: utrInput.trim(),
+        updatedAt: new Date().toISOString()
+      });
+      
+      setShowQrModal(false);
+      await refreshUser();
+      clearCart();
+      setOrderPlaced(true);
+      setTimeout(() => {
+        navigate('/orders');
+      }, 3000);
+    } catch (err: any) {
+      console.error(err);
+      setUtrError("Failed to verify. Please try again.");
+    } finally {
+      setLoadingVerify(false);
+    }
   };
 
   // ─── Empty Cart State ──────────────────────────────────────────────────
@@ -455,38 +418,7 @@ export default function Cart() {
                 <Wallet className="w-4 h-4 text-[#7A0000]" /> Payment Method
               </label>
               <div className="space-y-2 mt-3">
-                {/* Razorpay — Recommended */}
-                <button
-                  onClick={() => setPaymentMethod('razorpay')}
-                  className={cn(
-                    "w-full p-4 rounded-xl border-2 flex items-center gap-3 transition-all text-left",
-                    paymentMethod === 'razorpay'
-                      ? "border-[#7A0000] bg-red-50/50 shadow-sm"
-                      : "border-gray-100 bg-white hover:border-gray-200"
-                  )}
-                >
-                  <div className={cn(
-                    "w-10 h-10 rounded-xl flex items-center justify-center",
-                    paymentMethod === 'razorpay' ? "bg-[#7A0000] text-white" : "bg-gray-100 text-gray-400"
-                  )}>
-                    <Zap className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-900 text-sm">Razorpay</p>
-                      <span className="bg-green-100 text-green-700 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded shadow-sm">
-                        Recommended
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-gray-400">UPI, Cards, Net Banking — Instant</p>
-                  </div>
-                  <div className={cn(
-                    "w-5 h-5 rounded-full border-2 flex items-center justify-center",
-                    paymentMethod === 'razorpay' ? "border-[#7A0000] bg-[#7A0000]" : "border-gray-300"
-                  )}>
-                    {paymentMethod === 'razorpay' && <div className="w-2 h-2 rounded-full bg-white" />}
-                  </div>
-                </button>
+
 
                 {/* UPI QR — Manual Verification */}
                 <button
@@ -581,28 +513,70 @@ export default function Cart() {
               </div>
 
               {/* Amount highlight */}
-              <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-3 text-center">
-                <p className="text-xs text-gray-500 font-medium">Amount to Pay</p>
-                <p className="text-2xl font-black text-green-700">₹{finalTotal}</p>
+              <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4 text-center shadow-sm">
+                <p className="text-xs text-gray-500 font-medium uppercase tracking-widest">Amount to Pay</p>
+                <p className="text-3xl font-black text-green-700 my-1">₹{finalTotal}</p>
               </div>
 
-              <div className="text-center mb-4">
-                <p className="text-xs text-gray-400 font-medium">UPI ID</p>
-                <p className="font-bold text-gray-900 text-sm select-all">{UPI_ID}</p>
+              {/* Mobile Deep Links */}
+              <div className="mb-5 sm:hidden grid grid-cols-3 gap-2">
+                <a
+                  href={`gpay://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-4 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600 mt-1">GPay</span>
+                </a>
+                <a
+                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-4 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600 mt-1">PhonePe</span>
+                </a>
+                <a
+                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-3.5 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600 mt-1">Paytm</span>
+                </a>
+              </div>
+              <div className="hidden sm:block text-center mb-4">
+                <p className="text-xs text-gray-400 font-medium">Scan code with any UPI app</p>
+                <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
               </div>
 
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 mb-5 text-center">
-                <p className="text-[11px] text-amber-800 font-bold leading-relaxed">
-                  ⏳ After payment, click below. Admin will verify and confirm your order.
-                </p>
+              {/* UTR Input Field */}
+              <div className="mb-5 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-widest mb-2">
+                  Enter 12-Digit UTR Number
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 312345678901"
+                  className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium text-sm text-center tracking-widest"
+                  value={utrInput}
+                  onChange={(e) => {
+                    setUtrInput(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
+                    setUtrError('');
+                  }}
+                  maxLength={12}
+                />
+                {utrError && <p className="text-[10px] text-red-600 font-bold mt-2 text-center">{utrError}</p>}
               </div>
 
               <button
                 onClick={handleQrConfirm}
-                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all active:scale-95"
+                disabled={loadingVerify || utrInput.length < 8}
+                className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:shadow-none active:scale-95"
               >
-                <CheckCircle2 className="w-5 h-5" />
-                I Have Paid
+                {loadingVerify ? 'Submitting...' : (
+                  <>
+                    <CheckCircle2 className="w-5 h-5" />
+                    Submit UTR & Confirm
+                  </>
+                )}
               </button>
             </motion.div>
           </motion.div>

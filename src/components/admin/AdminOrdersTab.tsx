@@ -137,7 +137,11 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
 
       {/* QR Verification Actions (only for pending QR payments) */}
       {isQrPending && (
-        <div className="mb-3">
+        <div className="mb-3 space-y-2">
+          <div className="bg-blue-50 border border-blue-100 p-2 rounded-lg text-center">
+            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Customer UTR / Ref</p>
+            <p className="text-sm font-black text-gray-900 select-all">{order.utrNumber || 'Not provided'}</p>
+          </div>
           <QrVerifyActions orderId={order.id} />
         </div>
       )}

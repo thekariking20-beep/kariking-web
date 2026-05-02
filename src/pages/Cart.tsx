@@ -66,6 +66,17 @@ export default function Cart() {
   // Razorpay has been removed. All payments are verified via UTR on direct UPI.
 
 
+  const getValidationError = () => {
+    if (items.length === 0) return 'Cart empty';
+    if (!address) return 'Address missing. Please set your delivery location.';
+    if (!phone || phone.length < 10) return 'Valid phone number required.';
+    if (!paymentMethod && !(canPayFullyWithCoins && useCoins)) return 'Select a payment method.';
+    if (finalTotal <= 0 && !(canPayFullyWithCoins && useCoins)) return 'Order total must be greater than 0.';
+    return '';
+  };
+
+  const validationError = getValidationError();
+
   // ─── Core Checkout Handler ──────────────────────────────────────────────
   const handleCheckout = async () => {
     if (!user) {
@@ -73,8 +84,8 @@ export default function Cart() {
       return;
     }
 
-    if (!address || !phone) {
-      setError('Please provide delivery address and contact number.');
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -93,33 +104,47 @@ export default function Cart() {
     setLoading(true);
     setError('');
 
-    // Generate idempotency key to prevent duplicate orders on retries
-    const iKey = crypto.randomUUID();
-    setIdempotencyKey(iKey);
+    // Use existing idempotency key or generate a new one
+    // This ensures retries use the SAME key and do not create duplicates
+    let iKey = idempotencyKey;
+    if (!iKey) {
+      iKey = crypto.randomUUID();
+      setIdempotencyKey(iKey);
+    }
 
     try {
       const createOrderFn = httpsCallable(functions, 'createOrder');
       
-      const response = await createOrderFn({
-        items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
-        address,
-        phone,
-        useCoins,
-        coinsToUse: coinsBeingUsed,
-        paymentMethod: effectiveMethod,
-        deliveryFee,
-        idempotencyKey: iKey
-      });
+      let response;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          response = await createOrderFn({
+            items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+            address,
+            phone,
+            useCoins,
+            coinsToUse: coinsBeingUsed,
+            paymentMethod: effectiveMethod,
+            deliveryFee,
+            idempotencyKey: iKey
+          });
+          break; // Success
+        } catch (err) {
+          retries--;
+          if (retries === 0) throw err;
+          // Wait 1.5 seconds before auto-retry
+          await new Promise(res => setTimeout(res, 1500));
+        }
+      }
 
-      const data = response.data as { success: boolean; orderId: string; finalAmount: number };
+      const data = response?.data as { success: boolean; orderId: string; finalAmount: number } | undefined;
       
-      if (!data.success) {
-        throw new Error("Backend checkout failed.");
+      if (!data || !data.success) {
+        throw new Error("Connection issue, retry.");
       }
 
       // Direct UPI / QR Flow
-
-
       if (effectiveMethod === 'qr' && data.finalAmount > 0) {
         // Show QR modal — order already created with awaiting_payment status
         setQrOrderId(data.orderId);
@@ -133,14 +158,15 @@ export default function Cart() {
       if (effectiveMethod === 'coins' || data.finalAmount === 0) {
         await refreshUser();
         clearCart();
+        setIdempotencyKey(''); // Clear key on successful complete checkout
         setOrderPlaced(true);
         setTimeout(() => {
           navigate('/orders');
         }, 3000);
       }
     } catch (err: any) {
-      console.error(err);
-      setError('Failed to place order. Please try again.');
+      console.error('Checkout error:', err);
+      setError('Connection issue, retry.');
     } finally {
       setLoading(false);
     }
@@ -465,24 +491,24 @@ export default function Cart() {
             </div>
           )}
 
-          {error && (
-            <div className="bg-red-50 text-[#7A0000] p-3 rounded-lg mb-6 text-xs font-medium border border-red-100 flex items-center gap-2">
+          {(error || validationError) && (
+            <div className="bg-red-50 text-[#7A0000] p-3 rounded-lg mb-6 text-xs font-bold border border-red-100 flex items-center gap-2 shadow-sm">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {error}
+              {error || validationError}
             </div>
           )}
 
           <button
             onClick={handleCheckout}
-            disabled={loading}
-            className="ripple-btn w-full bg-premium-gradient text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-[0_8px_20px_rgba(122,0,0,0.3)] hover:shadow-[0_12px_25px_rgba(122,0,0,0.4)] disabled:opacity-50 active:scale-95"
+            disabled={loading || !!validationError}
+            className="ripple-btn w-full bg-premium-gradient text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-[0_8px_20px_rgba(122,0,0,0.3)] hover:shadow-[0_12px_25px_rgba(122,0,0,0.4)] disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
           >
-            {loading ? 'Processing...' : (
+            {loading ? 'Processing Securely...' : (
               canPayFullyWithCoins && useCoins 
                 ? `Pay with Coins — Place Order` 
                 : `Pay ₹${finalTotal} — Place Order`
             )}
-            <ArrowRight className="w-5 h-5" />
+            {!loading && <ArrowRight className="w-5 h-5" />}
           </button>
         </div>
       </div>

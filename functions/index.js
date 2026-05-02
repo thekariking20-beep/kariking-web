@@ -340,7 +340,10 @@ exports.createOrder = onCall(async (request) => {
   };
 
   const docRef = await db.collection("orders").add(orderData);
-  console.log(`📝 Order created: ${docRef.id} | Status: ${paymentStatus}`);
+  console.log(`[EVENT: orderCreated] Order ${docRef.id} successfully created. Status: ${paymentStatus}`);
+  if (paymentMethod === 'qr') {
+    console.log(`[EVENT: paymentStarted] Payment flow initiated for order ${docRef.id} via UPI QR.`);
+  }
 
   return { 
     success: true, 
@@ -406,7 +409,7 @@ exports.submitUtr = onCall(async (request) => {
     updatedAt: now,
   });
 
-  console.log(`📩 UTR submitted for order ${orderId}: ${trimmedUtr}`);
+  console.log(`[EVENT: utrSubmitted] UTR ${trimmedUtr} submitted for order ${orderId}`);
 
   // Notify admins
   try {
@@ -501,7 +504,7 @@ exports.verifyQrPayment = onCall(async (request) => {
       }
     } catch (e) { console.error("Notify error:", e); }
 
-    console.log(`✅ Order ${orderId} payment APPROVED`);
+    console.log(`[EVENT: adminApproved] Admin verified and confirmed order ${orderId}`);
     return { success: true, message: "Payment approved." };
   } else {
     // Reject — DON'T cancel order, allow retry
@@ -529,7 +532,7 @@ exports.verifyQrPayment = onCall(async (request) => {
       }
     } catch (e) { console.error("Notify error:", e); }
 
-    console.log(`❌ Order ${orderId} payment REJECTED: ${rejectReason}`);
+    console.log(`[EVENT: adminRejected] Admin rejected order ${orderId}: ${rejectReason}`);
     return { success: true, message: "Payment rejected. User can retry." };
   }
 });

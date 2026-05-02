@@ -140,14 +140,18 @@ export default function Home() {
   const grouped = useMemo(() => {
     const map: Record<string, Record<string, Product[]>> = {};
     products.forEach(p => {
-      const main = resolveCategory(p);
+      const resolved = resolveCategory(p);
+      // Case-insensitive match against MAIN_CATEGORIES to prevent missing categories
+      const matchingCat = MAIN_CATEGORIES.find(c => c.id.toLowerCase() === resolved.toLowerCase() || c.label.toLowerCase() === resolved.toLowerCase());
+      const main = matchingCat ? matchingCat.id : resolved;
+
       const sub = p.subCategory || 'General';
       if (!map[main]) map[main] = {};
       if (!map[main][sub]) map[main][sub] = [];
       map[main][sub].push(p);
     });
     return map as Record<string, Record<string, Product[]>>;
-  }, [products]);
+  }, [products, MAIN_CATEGORIES]);
 
   const activeMains = MAIN_CATEGORIES.filter(cat => grouped[cat.id]);
 

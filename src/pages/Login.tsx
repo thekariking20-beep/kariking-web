@@ -113,6 +113,20 @@ export default function Login() {
     return window.recaptchaVerifier;
   };
 
+  // Cleanup recaptcha on unmount to prevent "client element has been removed" error on re-login
+  useEffect(() => {
+    return () => {
+      if (window.recaptchaVerifier) {
+        try {
+          window.recaptchaVerifier.clear();
+        } catch (e) {
+          console.warn("Recaptcha clear failed:", e);
+        }
+        window.recaptchaVerifier = undefined;
+      }
+    };
+  }, []);
+
   // Resend OTP countdown timer
   useEffect(() => {
     if (countdown <= 0) return;

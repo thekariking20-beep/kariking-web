@@ -124,11 +124,13 @@ export function DeliverySkeleton() {
 
 // ─── Full Page Loader (Suspense fallback) ─────────────────────────────────────
 export function PageLoader() {
+  const isDark = localStorage.getItem('hasSeenWelcome') !== 'true';
+
   return (
-    <div className="flex items-center justify-center h-screen bg-[#0b0b0b]">
+    <div className={`flex items-center justify-center h-screen ${isDark ? 'bg-[#0b0b0b]' : 'bg-gray-50'}`}>
       <div className="text-center space-y-4">
         <div className="w-12 h-12 mx-auto border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm font-bold text-gray-400">Loading...</p>
+        <p className={`text-sm font-bold ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Loading...</p>
       </div>
     </div>
   );

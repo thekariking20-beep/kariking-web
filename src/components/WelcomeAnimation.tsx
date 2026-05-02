@@ -375,10 +375,10 @@ export default function WelcomeAnimation() {
       {show && (
         <motion.div
            key="welcome-overlay"
-           initial={{ opacity: 0 }}
+           initial={{ opacity: 1 }}
            animate={{ opacity: 1 }}
            exit={{ opacity: 0, transition: { duration: 1.2, ease: "easeInOut" } }}
-           className="fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-black"
+           className="fixed inset-0 z-[9999] flex flex-col items-center justify-center overflow-hidden bg-[#0b0b0b]"
         >
           <motion.canvas 
             ref={canvasRef} 

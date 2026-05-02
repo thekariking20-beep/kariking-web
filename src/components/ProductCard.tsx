@@ -86,7 +86,7 @@ export default function ProductCard({ product }: ProductCardProps) {
         ) : null}
 
         {/* Unit weight badge – bottom right of image */}
-        <div className="absolute bottom-1.5 right-1.5 bg-black/50 backdrop-blur-sm text-white text-[8px] font-bold px-1.5 py-[2px] rounded-md">
+        <div className="absolute bottom-1.5 right-1.5 bg-black/50 backdrop-blur-sm text-white text-[10px] font-bold px-2 py-[2px] rounded-md shadow-sm">
           {formatQty(baseUnitWeight, product.unitType)}
         </div>
       </div>

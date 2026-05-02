@@ -173,7 +173,7 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
                     <input
                       type="text"
                       required
-                      placeholder="e.g. No.11, Balamurugan Nagar 3rd Street"
+                      placeholder="e.g. Chinnabatakanapalli, Soolagiri TK"
                       value={street}
                       onChange={(e) => setStreet(e.target.value)}
                       onBlur={() => handleBlur('street')}
@@ -202,7 +202,7 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Madurai"
+                      placeholder="e.g. Krishnagiri"
                       value={city}
                       onChange={(e) => setCity(e.target.value.replace(/[^a-zA-Z\s]/g, ''))}
                       onBlur={() => handleBlur('city')}
@@ -232,7 +232,7 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
                       type="text"
                       inputMode="numeric"
                       required
-                      placeholder="e.g. 625018"
+                      placeholder="e.g. 635119"
                       maxLength={6}
                       value={pincode}
                       onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))}

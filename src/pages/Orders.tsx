@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, limit } from 'firebase/firestore';
-import { db } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
@@ -118,57 +119,33 @@ export default function Orders() {
   const [orders, setOrders]           = useState<Order[]>([]);
   const [loading, setLoading]         = useState(true);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
-  const [processingPaymentFor, setProcessingPaymentFor] = useState<string | null>(null);
-  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [retryUtr, setRetryUtr] = useState('');
+  const [retryingFor, setRetryingFor] = useState<string | null>(null);
+  const [retryError, setRetryError] = useState('');
+  const [retryLoading, setRetryLoading] = useState(false);
 
-  // Helper to safely load razorpay script
-  const loadRazorpay = async (): Promise<boolean> => {
-    return new Promise((resolve) => {
-      if ((window as any).Razorpay) return resolve(true);
-      const script = document.createElement('script');
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.onload = () => resolve(true);
-      script.onerror = () => resolve(false);
-      document.body.appendChild(script);
-    });
-  };
-
-  const handleRetryPayment = async (order: Order) => {
-    setProcessingPaymentFor(order.id);
+  const handleRetryUtr = async (orderId: string) => {
+    const trimmed = retryUtr.trim();
+    if (!/^\d{12}$/.test(trimmed)) {
+      setRetryError('UTR must be exactly 12 digits');
+      return;
+    }
+    setRetryLoading(true);
+    setRetryError('');
     try {
-      const loaded = await loadRazorpay();
-      if (!loaded) throw new Error('Razorpay failed to load.');
-
-      const options = {
-        key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-        amount: Math.round((order.finalAmount || order.totalAmount) * 100), // convert to paise
-        currency: 'INR',
-        name: 'Kari King',
-        description: `Retry Payment for Order #${order.id.slice(-6).toUpperCase()}`,
-        handler: async function (response: any) {
-          // Success update DB
-          await updateDoc(doc(db, 'orders', order.id), {
-            paymentStatus: 'paid',
-            updatedAt: new Date().toISOString()
-          });
-          setProcessingPaymentFor(null);
-        },
-        prefill: { contact: order.phone },
-        theme: { color: '#7A0000' },
-        modal: {
-          ondismiss: function () {
-            setProcessingPaymentFor(null);
-          }
-        }
-      };
-
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
+      const submitUtrFn = httpsCallable(functions, 'submitUtr');
+      await submitUtrFn({ orderId, utrNumber: trimmed });
+      setRetryingFor(null);
+      setRetryUtr('');
     } catch (err: any) {
-      console.error(err);
-      setErrorToast(err.message || 'Payment initiation failed.');
-      setTimeout(() => setErrorToast(null), 3000);
-      setProcessingPaymentFor(null);
+      const msg = err?.message || '';
+      if (msg.includes('already been used')) {
+        setRetryError('This UTR is already used for another order.');
+      } else {
+        setRetryError('Failed to submit. Please try again.');
+      }
+    } finally {
+      setRetryLoading(false);
     }
   };
 
@@ -320,20 +297,62 @@ export default function Orders() {
                           {/* Live Timeline */}
                           <LiveTimeline order={order} />
 
-                          {/* Retry Payment Banner */}
-                          {order.paymentStatus === 'pending' && order.paymentMethod === 'razorpay' && order.status !== 'Cancelled' && (
-                            <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                          {/* ─── UPI Payment Status Banners ──────────────── */}
+                          {order.paymentMethod === 'qr' && order.paymentStatus === 'awaiting_payment' && order.status !== 'Cancelled' && (
+                            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                              <p className="text-sm font-bold text-amber-800">⏳ Awaiting Payment</p>
+                              <p className="text-xs text-amber-600 mt-0.5">Please pay via UPI and submit your 12-digit UTR number.</p>
+                            </div>
+                          )}
+
+                          {order.paymentStatus === 'under_review' && (
+                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                              <p className="text-sm font-bold text-blue-800">🔍 Payment Under Verification</p>
+                              <p className="text-xs text-blue-600 mt-0.5">UTR: <span className="font-black select-all">{order.utrNumber}</span> — Admin is verifying your payment.</p>
+                            </div>
+                          )}
+
+                          {order.paymentStatus === 'confirmed' && (
+                            <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                              <p className="text-sm font-bold text-green-800">✅ Payment Confirmed</p>
+                              <p className="text-xs text-green-600 mt-0.5">Your payment has been verified successfully.</p>
+                            </div>
+                          )}
+
+                          {order.paymentStatus === 'rejected' && order.status !== 'Cancelled' && (
+                            <div className="bg-red-50 border border-red-100 rounded-xl p-4 space-y-3">
                               <div>
-                                <p className="text-sm font-bold text-red-800">Pending Payment</p>
-                                <p className="text-xs text-red-600 mt-0.5">Your order is saved, but payment was not completed securely.</p>
+                                <p className="text-sm font-bold text-red-800">❌ Payment Rejected</p>
+                                <p className="text-xs text-red-600 mt-0.5">{order.rejectReason || 'Your UTR could not be verified. Please re-submit.'}</p>
                               </div>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleRetryPayment(order); }}
-                                disabled={processingPaymentFor === order.id}
-                                className="bg-red-600 text-white font-bold py-2 px-5 rounded-lg text-sm whitespace-nowrap shadow-md active:scale-95 transition-all disabled:opacity-50"
-                              >
-                                {processingPaymentFor === order.id ? 'Loading...' : 'Retry Payment'}
-                              </button>
+                              {retryingFor === order.id ? (
+                                <div className="space-y-2">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="Enter new 12-digit UTR"
+                                    maxLength={12}
+                                    value={retryUtr}
+                                    onChange={(e) => { setRetryUtr(e.target.value.replace(/\D/g, '')); setRetryError(''); }}
+                                    className="w-full p-2.5 border border-gray-300 rounded-lg text-sm text-center tracking-widest font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                  />
+                                  {retryError && <p className="text-[10px] text-red-600 font-bold text-center">{retryError}</p>}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleRetryUtr(order.id); }}
+                                    disabled={retryLoading || retryUtr.length !== 12}
+                                    className="w-full bg-blue-600 text-white font-bold py-2.5 rounded-lg text-sm shadow-md active:scale-95 transition-all disabled:opacity-50"
+                                  >
+                                    {retryLoading ? 'Submitting...' : 'Re-Submit UTR'}
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setRetryingFor(order.id); setRetryUtr(''); setRetryError(''); }}
+                                  className="bg-red-600 text-white font-bold py-2 px-5 rounded-lg text-sm shadow-md active:scale-95 transition-all"
+                                >
+                                  Retry Payment
+                                </button>
+                              )}
                             </div>
                           )}
 

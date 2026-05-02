@@ -6,8 +6,7 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useAddress } from '../context/AddressContext';
 import { httpsCallable } from 'firebase/functions';
-import { doc, increment, updateDoc, collection, addDoc } from 'firebase/firestore';
-import { db, functions } from '../firebase';
+import { functions } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatQty } from '../lib/units';
 import Confetti from 'react-confetti';
@@ -47,6 +46,7 @@ export default function Cart() {
   const [utrInput, setUtrInput] = useState('');
   const [utrError, setUtrError] = useState('');
   const [loadingVerify, setLoadingVerify] = useState(false);
+  const [idempotencyKey, setIdempotencyKey] = useState('');
 
   const { width, height } = useWindowSize();
 
@@ -93,6 +93,10 @@ export default function Cart() {
     setLoading(true);
     setError('');
 
+    // Generate idempotency key to prevent duplicate orders on retries
+    const iKey = crypto.randomUUID();
+    setIdempotencyKey(iKey);
+
     try {
       const createOrderFn = httpsCallable(functions, 'createOrder');
       
@@ -103,7 +107,8 @@ export default function Cart() {
         useCoins,
         coinsToUse: coinsBeingUsed,
         paymentMethod: effectiveMethod,
-        deliveryFee
+        deliveryFee,
+        idempotencyKey: iKey
       });
 
       const data = response.data as { success: boolean; orderId: string; finalAmount: number };
@@ -141,10 +146,12 @@ export default function Cart() {
     }
   };
 
-  // ─── QR "I Have Paid" Handler ──────────────────────────────────────────
+  // ─── UTR Submit Handler (Server-Validated) ─────────────────────────────
   const handleQrConfirm = async () => {
-    if (!utrInput || utrInput.trim().length < 8) {
-      setUtrError("Please enter a valid UTR / Transaction ID (usually 12 digits)");
+    // Strict 12-digit numeric validation
+    const trimmedUtr = utrInput.trim();
+    if (!/^\d{12}$/.test(trimmedUtr)) {
+      setUtrError('UTR must be exactly 12 digits (numbers only)');
       return;
     }
     
@@ -152,11 +159,9 @@ export default function Cart() {
     setUtrError('');
     
     try {
-      // Save UTR to the already created order
-      await updateDoc(doc(db, 'orders', qrOrderId), {
-        utrNumber: utrInput.trim(),
-        updatedAt: new Date().toISOString()
-      });
+      // Call server-side function for validation + global uniqueness check
+      const submitUtrFn = httpsCallable(functions, 'submitUtr');
+      await submitUtrFn({ orderId: qrOrderId, utrNumber: trimmedUtr });
       
       setShowQrModal(false);
       await refreshUser();
@@ -167,7 +172,15 @@ export default function Cart() {
       }, 3000);
     } catch (err: any) {
       console.error(err);
-      setUtrError("Failed to verify. Please try again.");
+      // Extract Firebase error message
+      const msg = err?.message || '';
+      if (msg.includes('already been used')) {
+        setUtrError('This UTR has already been used for another order.');
+      } else if (msg.includes('12 digits')) {
+        setUtrError('UTR must be exactly 12 digits.');
+      } else {
+        setUtrError('Verification failed. Please check UTR and try again.');
+      }
     } finally {
       setLoadingVerify(false);
     }
@@ -559,7 +572,7 @@ export default function Cart() {
                   className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium text-sm text-center tracking-widest"
                   value={utrInput}
                   onChange={(e) => {
-                    setUtrInput(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
+                    setUtrInput(e.target.value.replace(/\D/g, ''));
                     setUtrError('');
                   }}
                   maxLength={12}
@@ -569,7 +582,7 @@ export default function Cart() {
 
               <button
                 onClick={handleQrConfirm}
-                disabled={loadingVerify || utrInput.length < 8}
+                disabled={loadingVerify || utrInput.length !== 12}
                 className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:shadow-none active:scale-95"
               >
                 {loadingVerify ? 'Submitting...' : (

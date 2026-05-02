@@ -76,7 +76,7 @@ export default function DashboardOverview({ orders }: DashboardOverviewProps) {
       const amount = order.finalAmount !== undefined ? order.finalAmount : (order.totalAmount || 0);
 
       const isRevenueEligible = order.status !== 'Cancelled' && order.paymentStatus !== 'failed' && 
-                                (order.paymentStatus === 'paid' || order.paymentStatus === 'pending_verification');
+                                (order.paymentStatus === 'paid' || order.paymentStatus === 'confirmed' || order.paymentStatus === 'under_review');
 
       // KPIs
       if (isRevenueEligible) {

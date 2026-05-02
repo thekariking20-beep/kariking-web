@@ -16,32 +16,30 @@ interface AdminOrdersTabProps {
 // ─── Payment Badge Component ────────────────────────────────────────────
 function PaymentBadge({ method, status }: { method: string; status: string }) {
   const configs: Record<string, { icon: React.ElementType; bg: string; text: string; label: string }> = {
-    razorpay: { icon: Zap, bg: 'bg-green-100', text: 'text-green-700', label: 'Razorpay' },
     qr: { icon: QrCode, bg: 'bg-blue-100', text: 'text-blue-700', label: 'UPI QR' },
     coins: { icon: Coins, bg: 'bg-amber-100', text: 'text-amber-700', label: 'Coins' },
-    cod: { icon: CreditCard, bg: 'bg-gray-100', text: 'text-gray-600', label: 'COD' },
   };
-  const config = configs[method] || configs.cod;
+  const config = configs[method] || { icon: CreditCard, bg: 'bg-gray-100', text: 'text-gray-600', label: method };
   const Icon = config.icon;
 
+  const statusMap: Record<string, { bg: string; text: string; label: string; pulse?: boolean }> = {
+    awaiting_payment: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Awaiting', pulse: true },
+    under_review: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Under Review', pulse: true },
+    confirmed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Confirmed' },
+    paid: { bg: 'bg-green-100', text: 'text-green-700', label: 'Paid' },
+    rejected: { bg: 'bg-red-100', text: 'text-red-700', label: 'Rejected' },
+    failed: { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed' },
+  };
+  const st = statusMap[status];
+
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5 flex-wrap">
       <span className={`inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${config.bg} ${config.text}`}>
         <Icon className="w-3 h-3" /> {config.label}
       </span>
-      {status === 'pending_verification' && (
-        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-orange-100 text-orange-700 animate-pulse">
-          <Clock className="w-3 h-3" /> Pending
-        </span>
-      )}
-      {status === 'paid' && (
-        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-green-100 text-green-700">
-          <CheckCircle2 className="w-3 h-3" /> Paid
-        </span>
-      )}
-      {status === 'failed' && (
-        <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-red-100 text-red-700">
-          <XCircle className="w-3 h-3" /> Failed
+      {st && (
+        <span className={`inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${st.bg} ${st.text} ${st.pulse ? 'animate-pulse' : ''}`}>
+          {st.label}
         </span>
       )}
     </div>
@@ -54,10 +52,15 @@ function QrVerifyActions({ orderId }: { orderId: string }) {
   const [done, setDone] = useState<'approved' | 'rejected' | null>(null);
 
   const handleVerify = async (action: 'approve' | 'reject') => {
+    let rejectReason: string | undefined;
+    if (action === 'reject') {
+      rejectReason = prompt('Reason for rejection (shown to customer):') || 'Payment could not be verified';
+    }
+    
     setVerifying(action);
     try {
       const verifyFn = httpsCallable(functions, 'verifyQrPayment');
-      await verifyFn({ orderId, action });
+      await verifyFn({ orderId, action, rejectReason });
       setDone(action === 'approve' ? 'approved' : 'rejected');
     } catch (err) {
       console.error('QR verify error:', err);
@@ -71,7 +74,7 @@ function QrVerifyActions({ orderId }: { orderId: string }) {
       <div className={`text-xs font-black uppercase tracking-widest text-center py-2 rounded-xl ${
         done === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
       }`}>
-        {done === 'approved' ? '✅ Payment Approved' : '❌ Payment Rejected'}
+        {done === 'approved' ? '✅ Payment Approved' : '❌ Payment Rejected (User can retry)'}
       </div>
     );
   }
@@ -105,11 +108,11 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
   updateOrderStatus: (orderId: string, newStatus: Order['status']) => Promise<void>;
   accentColor: string;
 }) {
-  const isQrPending = order.paymentMethod === 'qr' && order.paymentStatus === 'pending_verification';
+  const isUnderReview = order.paymentMethod === 'qr' && order.paymentStatus === 'under_review';
 
   return (
     <div className={`bg-white p-4 rounded-2xl border shadow-sm hover:shadow-md transition-all ${
-      isQrPending ? 'border-orange-200 ring-2 ring-orange-100' : `border-${accentColor}-100`
+      isUnderReview ? 'border-orange-200 ring-2 ring-orange-100' : `border-${accentColor}-100`
     }`}>
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{order.id.slice(-6)}</span>
@@ -135,12 +138,15 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
         </p>
       )}
 
-      {/* QR Verification Actions (only for pending QR payments) */}
-      {isQrPending && (
+      {/* UPI Verification Panel (only for under_review orders) */}
+      {isUnderReview && (
         <div className="mb-3 space-y-2">
-          <div className="bg-blue-50 border border-blue-100 p-2 rounded-lg text-center">
-            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Customer UTR / Ref</p>
-            <p className="text-sm font-black text-gray-900 select-all">{order.utrNumber || 'Not provided'}</p>
+          <div className="bg-blue-50 border border-blue-100 p-3 rounded-xl">
+            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Customer UTR Number</p>
+            <p className="text-lg font-black text-gray-900 select-all text-center tracking-widest">{order.utrNumber || 'Not provided'}</p>
+            {order.paymentSubmittedAt && (
+              <p className="text-[9px] text-gray-400 text-center mt-1">Submitted: {new Date(order.paymentSubmittedAt).toLocaleString('en-IN')}</p>
+            )}
           </div>
           <QrVerifyActions orderId={order.id} />
         </div>
@@ -200,20 +206,20 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
     });
   };
 
-  // Count QR pending orders strictly for normal orders
-  const qrPendingCount = orders.filter(o => o.paymentMethod === 'qr' && o.paymentStatus === 'pending_verification').length;
+  // Count UTR submissions awaiting admin verification
+  const qrPendingCount = orders.filter(o => o.paymentMethod === 'qr' && o.paymentStatus === 'under_review').length;
 
   return (
     <div className="space-y-6">
-      {/* QR Pending Alert */}
+      {/* UTR Pending Alert */}
       {qrPendingCount > 0 && (
         <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center flex-shrink-0">
             <QrCode className="w-5 h-5 text-orange-600" />
           </div>
           <div className="flex-1">
-            <h4 className="font-black text-orange-900 text-sm">QR Payments Pending Verification</h4>
-            <p className="text-xs text-orange-700">{qrPendingCount} order{qrPendingCount > 1 ? 's' : ''} waiting for payment confirmation</p>
+            <h4 className="font-black text-orange-900 text-sm">UTR Payments — Verify Now</h4>
+            <p className="text-xs text-orange-700">{qrPendingCount} order{qrPendingCount > 1 ? 's' : ''} with UTR submitted, awaiting your approval</p>
           </div>
           <span className="bg-orange-500 text-white text-xs font-bold px-3 py-1 rounded-lg animate-pulse">
             {qrPendingCount}

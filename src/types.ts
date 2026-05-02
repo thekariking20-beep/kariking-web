@@ -213,18 +213,17 @@ export interface Order {
   totalAmount: number;        // Subtotal before discounts
   finalAmount: number;        // Final amount after coins + delivery
   // ─── Payment Architecture ──────────────────────────────────────
-  paymentMethod: 'razorpay' | 'qr' | 'coins';
-  paymentStatus: 'pending' | 'pending_verification' | 'paid' | 'failed' | 'refunded';
-  razorpayOrderId?: string;
-  razorpayPaymentId?: string;
-  razorpaySignature?: string;
+  paymentMethod: 'qr' | 'coins';
+  paymentStatus: 'pending' | 'awaiting_payment' | 'under_review' | 'confirmed' | 'rejected' | 'paid' | 'failed';
   utrNumber?: string;
+  idempotencyKey?: string;
+  rejectReason?: string;
+  paymentSubmittedAt?: string;
+  verifiedAt?: string;
   // ─── Order Details ────────────────────────────────────────────────
   status: 'Order Placed' | 'Order Received' | 'Packed' | 'Dispatched' | 'Delivered' | 'Cancelled';
   statusHistory: StatusUpdate[];
   address: string;
-  locationLat?: number;
-  locationLng?: number;
   phone: string;
   coinsUsed: number;
   discountAmount: number;

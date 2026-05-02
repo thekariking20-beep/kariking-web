@@ -206,19 +206,40 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   return null;
 });
 
-// ─── Cloud Function: Create Order (Server-Side Pricing) ───────────────────
+// ─── Cloud Function: Create Order (Server-Side Pricing + Idempotency) ─────────
 exports.createOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in to order.");
   }
 
-  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, utrNumber } = request.data;
+  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey } = request.data;
   
   if (!items || !items.length || !address || !phone) {
     throw new HttpsError("invalid-argument", "Missing required fields.");
   }
 
   const userId = request.auth.uid;
+
+  // ─── Idempotency Check: prevent duplicate orders on network retries ───────
+  if (idempotencyKey) {
+    const existingOrders = await db.collection("orders")
+      .where("userId", "==", userId)
+      .where("idempotencyKey", "==", idempotencyKey)
+      .limit(1)
+      .get();
+
+    if (!existingOrders.empty) {
+      const existingOrder = existingOrders.docs[0];
+      const existingData = existingOrder.data();
+      console.log(`♻️ Idempotent hit: reusing order ${existingOrder.id}`);
+      return {
+        success: true,
+        orderId: existingOrder.id,
+        finalAmount: existingData.finalAmount
+      };
+    }
+  }
+
   let totalPrice = 0;
   let validatedItems = [];
 
@@ -231,7 +252,6 @@ exports.createOrder = onCall(async (request) => {
     }
     const product = productDoc.data();
     
-    // Reproduce Cart logic:
     const baseWeight = product.baseWeight || 1;
     const priceRatio = item.quantity / baseWeight;
     const itemTotal = product.sellingPrice * priceRatio;
@@ -260,16 +280,15 @@ exports.createOrder = onCall(async (request) => {
     const availableCoins = userDoc.data().coins || 0;
 
     if (availableCoins > 0) {
-      // Server-side validation of requested coins
       const maxCoins = Math.min(
         availableCoins,
-        Math.floor(totalPrice / COIN_VALUE)  // Cannot exceed total
+        Math.floor(totalPrice / COIN_VALUE)
       );
       coinsUsed = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
       discountAmount = coinsUsed * COIN_VALUE;
 
       // For QR payments: coins deducted only AFTER admin verification
-      // For Razorpay/Coins: deduct immediately (payment is instant)
+      // For Coins-only: deduct immediately (payment is instant)
       if (paymentMethod !== 'qr' && coinsUsed > 0) {
         await userDoc.ref.update({
           coins: FieldValue.increment(-coinsUsed)
@@ -289,12 +308,14 @@ exports.createOrder = onCall(async (request) => {
   const finalAmount = Math.max(0, totalPrice - discountAmount) + (deliveryFee || 0);
   const now = new Date().toISOString();
 
-  // Determine payment status based on method
+  // ─── Status Machine ─────────────────────────────────────────────────────
+  // QR orders start as 'awaiting_payment' until user submits UTR
+  // Coins-only orders that cover the full amount are immediately 'paid'
   let paymentStatus = 'pending';
   if (paymentMethod === 'coins' && finalAmount <= 0) {
-    paymentStatus = 'paid'; // Fully paid with coins
+    paymentStatus = 'paid';
   } else if (paymentMethod === 'qr') {
-    paymentStatus = 'pending_verification'; // Needs admin approval
+    paymentStatus = 'awaiting_payment';
   }
 
   const orderData = {
@@ -307,19 +328,19 @@ exports.createOrder = onCall(async (request) => {
     status: "Order Placed",
     statusHistory: [{ status: "Order Placed", time: now }],
     address,
-    ...(request.data.locationLat ? { locationLat: request.data.locationLat } : {}),
-    ...(request.data.locationLng ? { locationLng: request.data.locationLng } : {}),
     phone,
     coinsUsed,
-    pendingCoinsDeduction: paymentMethod === 'qr' ? coinsUsed : 0, // Track for QR verification
+    pendingCoinsDeduction: paymentMethod === 'qr' ? coinsUsed : 0,
     discountAmount,
     deliveryCharge: deliveryFee || 0,
-    utrNumber: utrNumber || null,
+    utrNumber: null,
+    idempotencyKey: idempotencyKey || null,
     createdAt: now,
     updatedAt: now,
   };
 
   const docRef = await db.collection("orders").add(orderData);
+  console.log(`📝 Order created: ${docRef.id} | Status: ${paymentStatus}`);
 
   return { 
     success: true, 
@@ -328,13 +349,97 @@ exports.createOrder = onCall(async (request) => {
   };
 });
 
+// ─── Cloud Function: Submit UTR (User-Side, Server-Validated) ─────────────────
+exports.submitUtr = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  const { orderId, utrNumber } = request.data;
+  if (!orderId || !utrNumber) {
+    throw new HttpsError("invalid-argument", "Missing orderId or utrNumber.");
+  }
+
+  // ─── Strict UTR Validation ──────────────────────────────────────────────
+  const trimmedUtr = utrNumber.trim();
+  if (!/^\d{12}$/.test(trimmedUtr)) {
+    throw new HttpsError("invalid-argument", "UTR must be exactly 12 digits.");
+  }
+
+  // ─── Verify order belongs to this user ──────────────────────────────────
+  const orderRef = db.doc(`orders/${orderId}`);
+  const orderDoc = await orderRef.get();
+  if (!orderDoc.exists) {
+    throw new HttpsError("not-found", "Order not found.");
+  }
+
+  const order = orderDoc.data();
+  if (order.userId !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "This is not your order.");
+  }
+
+  // Only allow UTR submission for orders in awaiting_payment or rejected state
+  if (!['awaiting_payment', 'rejected'].includes(order.paymentStatus)) {
+    throw new HttpsError("failed-precondition", `Cannot submit UTR for order in '${order.paymentStatus}' state.`);
+  }
+
+  // ─── Global UTR Uniqueness Check ───────────────────────────────────────
+  const duplicateCheck = await db.collection("orders")
+    .where("utrNumber", "==", trimmedUtr)
+    .limit(1)
+    .get();
+
+  if (!duplicateCheck.empty) {
+    const existingOrderId = duplicateCheck.docs[0].id;
+    // Allow re-submitting same UTR to same order (idempotent)
+    if (existingOrderId !== orderId) {
+      throw new HttpsError("already-exists", "This UTR has already been used for another order.");
+    }
+  }
+
+  // ─── Update order: awaiting_payment → under_review ─────────────────────
+  const now = new Date().toISOString();
+  await orderRef.update({
+    utrNumber: trimmedUtr,
+    paymentStatus: "under_review",
+    paymentSubmittedAt: now,
+    updatedAt: now,
+  });
+
+  console.log(`📩 UTR submitted for order ${orderId}: ${trimmedUtr}`);
+
+  // Notify admins
+  try {
+    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+    const tokens = [];
+    adminsSnap.forEach((doc) => {
+      const token = doc.data().fcmToken;
+      if (token) tokens.push(token);
+    });
+
+    if (tokens.length > 0) {
+      const messages = tokens.map((token) => ({
+        token,
+        notification: {
+          title: "💰 UTR Submitted — Verify Payment",
+          body: `Order #${orderId.slice(-6).toUpperCase()} | UTR: ${trimmedUtr} | ₹${order.finalAmount}`,
+        },
+        data: { orderId, type: "utr_submitted" },
+      }));
+      await Promise.all(messages.map((msg) => getMessaging().send(msg)));
+    }
+  } catch (e) { console.error("Admin notify error:", e); }
+
+  return { success: true, message: "UTR submitted. Payment is under review." };
+});
+
 // ─── Cloud Function: Verify QR Payment (Admin-Only) ──────────────────────────
 exports.verifyQrPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in.");
   }
 
-  const { orderId, action } = request.data; // action: 'approve' | 'reject'
+  const { orderId, action, rejectReason } = request.data; // action: 'approve' | 'reject'
   if (!orderId || !['approve', 'reject'].includes(action)) {
     throw new HttpsError("invalid-argument", "Invalid orderId or action.");
   }
@@ -352,8 +457,8 @@ exports.verifyQrPayment = onCall(async (request) => {
   }
 
   const order = orderDoc.data();
-  if (order.paymentStatus !== 'pending_verification') {
-    throw new HttpsError("failed-precondition", "Order is not pending verification.");
+  if (order.paymentStatus !== 'under_review') {
+    throw new HttpsError("failed-precondition", "Order is not under review.");
   }
 
   const now = new Date().toISOString();
@@ -368,14 +473,16 @@ exports.verifyQrPayment = onCall(async (request) => {
         userId: order.userId,
         amount: order.pendingCoinsDeduction,
         type: "spending",
-        source: "Order Discount (QR Verified)",
+        source: "Order Discount (UPI Verified)",
         createdAt: now
       });
     }
 
     await orderRef.update({
-      paymentStatus: "paid",
+      paymentStatus: "confirmed",
       pendingCoinsDeduction: 0,
+      verifiedAt: now,
+      verifiedBy: request.auth.uid,
       updatedAt: now
     });
 
@@ -388,20 +495,22 @@ exports.verifyQrPayment = onCall(async (request) => {
           token: fcmToken,
           notification: {
             title: "✅ Payment Verified!",
-            body: `Your QR payment for order #${orderId.slice(-6).toUpperCase()} has been confirmed.`,
+            body: `Your payment for order #${orderId.slice(-6).toUpperCase()} has been confirmed.`,
           }
         });
       }
     } catch (e) { console.error("Notify error:", e); }
 
+    console.log(`✅ Order ${orderId} payment APPROVED`);
     return { success: true, message: "Payment approved." };
   } else {
-    // Reject — cancel order
+    // Reject — DON'T cancel order, allow retry
     await orderRef.update({
-      paymentStatus: "failed",
-      status: "Cancelled",
-      pendingCoinsDeduction: 0,
-      statusHistory: FieldValue.arrayUnion({ status: "Cancelled", time: now, reason: "QR Payment Rejected" }),
+      paymentStatus: "rejected",
+      rejectReason: rejectReason || "Payment could not be verified",
+      utrNumber: null, // Clear UTR so user can re-submit
+      rejectedAt: now,
+      rejectedBy: request.auth.uid,
       updatedAt: now
     });
 
@@ -413,14 +522,15 @@ exports.verifyQrPayment = onCall(async (request) => {
         await getMessaging().send({
           token: fcmToken,
           notification: {
-            title: "❌ Payment Rejected",
-            body: `Your QR payment for order #${orderId.slice(-6).toUpperCase()} was not verified. Order cancelled.`,
+            title: "❌ Payment Not Verified",
+            body: `Order #${orderId.slice(-6).toUpperCase()}: ${rejectReason || "Please re-submit your UTR."}`,
           }
         });
       }
     } catch (e) { console.error("Notify error:", e); }
 
-    return { success: true, message: "Payment rejected, order cancelled." };
+    console.log(`❌ Order ${orderId} payment REJECTED: ${rejectReason}`);
+    return { success: true, message: "Payment rejected. User can retry." };
   }
 });
 

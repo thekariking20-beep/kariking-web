@@ -4,6 +4,7 @@ import { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { motion } from 'motion/react';
 import { formatQty, unitLabel } from '../lib/units';
+import { cn } from '../lib/utils';
 
 interface ProductCardProps {
   product: Product;
@@ -53,23 +54,27 @@ export default function ProductCard({ product }: ProductCardProps) {
           alt={product.name}
           loading="lazy"
           decoding="async"
-          className="absolute inset-0 w-full h-full object-cover"
+          className={cn(
+            "absolute inset-0 w-full h-full object-cover transition-all",
+            product.isComingSoon && "grayscale-[50%] opacity-80 blur-[2px] scale-105"
+          )}
           referrerPolicy="no-referrer"
         />
         {/* Bottom gradient for text readability */}
-        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/25 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent" />
         
-        {/* Sold Out overlay */}
-        {!product.isAvailable && (
+        {/* Status Overlays */}
+        {product.isComingSoon ? (
+          <div className="absolute top-1.5 left-1.5 text-white text-[8px] font-black uppercase tracking-wide px-2 py-[3px] rounded-md shadow-md bg-gradient-to-r from-amber-500 to-yellow-600 border border-amber-300/30">
+            COMING SOON
+          </div>
+        ) : !product.isAvailable ? (
           <div className="absolute inset-0 bg-black/55 flex items-center justify-center backdrop-blur-[2px]">
             <span className="bg-white text-gray-900 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider shadow-md">
               Sold Out
             </span>
           </div>
-        )}
-
-        {/* Discount badge */}
-        {product.discountPercentage ? (
+        ) : product.discountPercentage ? (
           <div 
             className="absolute top-1.5 left-1.5 text-white text-[8px] font-black uppercase tracking-wide px-2 py-[3px] rounded-md shadow-md"
             style={{
@@ -95,64 +100,82 @@ export default function ProductCard({ product }: ProductCardProps) {
 
         {/* Spacer pushes price + button to bottom */}
         <div className="mt-auto pt-1.5">
-          {/* Price row */}
-          <div className="flex items-end justify-between gap-1">
-            <div className="min-w-0">
-              <span className="text-base sm:text-lg font-black text-gray-900 leading-none block">
-                ₹{product.sellingPrice}
-              </span>
-              {hasDiscount && (
-                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                  <span className="text-[10px] text-gray-400 line-through leading-none">
-                    ₹{product.mrpPrice}
-                  </span>
-                  {savings > 0 && (
-                    <span className="text-[7px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1 py-[1px] rounded leading-none">
-                      Save ₹{savings}
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Cart controls */}
-            {cartItem ? (
-              <div className="flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-red-700 rounded-lg px-1 py-[3px] shadow-lg shrink-0">
-                <motion.button
-                  whileTap={{ scale: 0.8 }}
-                  onClick={handleMinus}
-                  className="text-white rounded p-0.5 active:bg-white/20"
-                  aria-label="Decrease quantity"
-                >
-                  <Minus className="w-3.5 h-3.5" />
-                </motion.button>
-                <span className="font-black text-white text-[11px] leading-none min-w-[22px] text-center">
-                  {formatQty(cartItem.quantity, product.unitType)}
+            {/* Price row */}
+            {product.isComingSoon ? (
+              <div className="flex items-center justify-between w-full">
+                <span className="text-xs sm:text-sm font-black text-amber-600 leading-none block">
+                  Coming Soon 🔜
                 </span>
                 <motion.button
-                  whileTap={{ scale: 0.8 }}
-                  onClick={handlePlus}
-                  className="text-white rounded p-0.5 active:bg-white/20"
-                  aria-label="Increase quantity"
+                  whileTap={{ scale: 0.9 }}
+                  onClick={() => alert("You will be notified when this product is available!")}
+                  className="text-white text-[9px] font-bold px-2 py-1.5 rounded-lg active:scale-95 shrink-0 shadow-sm border border-amber-500/20"
+                  style={{
+                    background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                  }}
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  Notify Me
                 </motion.button>
               </div>
             ) : (
-              <motion.button
-                whileTap={{ scale: 0.85 }}
-                onClick={() => addToCart(product)}
-                disabled={!product.isAvailable}
-                className="text-white p-[7px] rounded-xl disabled:opacity-40 active:scale-95 shrink-0 shadow-lg"
-                style={{
-                  background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
-                  boxShadow: '0 4px 14px rgba(220,38,38,0.3)',
-                }}
-              >
-                <ShoppingCart className="w-[15px] h-[15px]" />
-              </motion.button>
+              <div className="flex items-end justify-between gap-1 w-full">
+                <div className="min-w-0">
+                  <span className="text-base sm:text-lg font-black text-gray-900 leading-none block">
+                    ₹{product.sellingPrice}
+                  </span>
+                  {hasDiscount && (
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                      <span className="text-[10px] text-gray-400 line-through leading-none">
+                        ₹{product.mrpPrice}
+                      </span>
+                      {savings > 0 && (
+                        <span className="text-[7px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1 py-[1px] rounded leading-none">
+                          Save ₹{savings}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Cart controls */}
+                {cartItem ? (
+                  <div className="flex items-center gap-0.5 bg-gradient-to-r from-red-600 to-red-700 rounded-lg px-1 py-[3px] shadow-lg shrink-0">
+                    <motion.button
+                      whileTap={{ scale: 0.8 }}
+                      onClick={handleMinus}
+                      className="text-white rounded p-0.5 active:bg-white/20"
+                      aria-label="Decrease quantity"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </motion.button>
+                    <span className="font-black text-white text-[11px] leading-none min-w-[22px] text-center">
+                      {formatQty(cartItem.quantity, product.unitType)}
+                    </span>
+                    <motion.button
+                      whileTap={{ scale: 0.8 }}
+                      onClick={handlePlus}
+                      className="text-white rounded p-0.5 active:bg-white/20"
+                      aria-label="Increase quantity"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </motion.button>
+                  </div>
+                ) : (
+                  <motion.button
+                    whileTap={{ scale: 0.85 }}
+                    onClick={() => addToCart(product)}
+                    disabled={!product.isAvailable}
+                    className="text-white p-[7px] rounded-xl disabled:opacity-40 active:scale-95 shrink-0 shadow-lg"
+                    style={{
+                      background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
+                      boxShadow: '0 4px 14px rgba(220,38,38,0.3)',
+                    }}
+                  >
+                    <ShoppingCart className="w-[15px] h-[15px]" />
+                  </motion.button>
+                )}
+              </div>
             )}
-          </div>
         </div>
       </div>
     </motion.div>

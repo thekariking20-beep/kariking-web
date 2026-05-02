@@ -55,6 +55,7 @@ export default function Admin() {
     minOrderQty: 500,
     stepSize: 250,
     isAvailable: true,
+    isComingSoon: false,
   });
 
   // Derived subcategories based on selected main category (now dynamic)
@@ -173,11 +174,25 @@ export default function Admin() {
     }
   };
 
+  const toggleComingSoon = async (product: Product) => {
+    try {
+      const newComingSoon = !product.isComingSoon;
+      // If setting to coming soon, automatically disable availability
+      const updates: any = { isComingSoon: newComingSoon };
+      if (newComingSoon) updates.isAvailable = false;
+      
+      await updateDoc(doc(db, 'products', product.id), updates);
+      setProducts(prev => prev.map(p => p.id === product.id ? { ...p, ...updates } : p));
+    } catch (error) {
+      console.error("Error toggling coming soon:", error);
+    }
+  };
+
   const resetForm = () => {
     setFormData({ 
       name: '', mainCategory: dynamicCategories[0]?.id || 'Chicken', subCategory: dynamicCategories[0]?.subCategories?.[0]?.id || '', customSubCategory: '',
       image: '', description: '', mrpPrice: 0, sellingPrice: 0, 
-      unitType: 'gram', baseWeight: 1000, minOrderQty: 500, stepSize: 250, isAvailable: true 
+      unitType: 'gram', baseWeight: 1000, minOrderQty: 500, stepSize: 250, isAvailable: true, isComingSoon: false
     });
     setEditingProduct(null);
     setShowAddForm(false);
@@ -202,6 +217,7 @@ export default function Admin() {
       minOrderQty: product.minOrderQty || 500,
       stepSize: product.stepSize || 250,
       isAvailable: product.isAvailable,
+      isComingSoon: product.isComingSoon || false,
     });
     setShowAddForm(true);
   };
@@ -776,10 +792,16 @@ export default function Admin() {
                               </div>
                             </td>
                             <td className="p-4 text-center">
-                              <button onClick={() => toggleAvailability(product)} className={cn("inline-flex items-center gap-2 font-bold text-xs uppercase transition-colors", product.isAvailable ? "text-green-600" : "text-red-400")}>
-                                {product.isAvailable ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
-                                {product.isAvailable ? 'Available' : 'Sold Out'}
-                              </button>
+                              <div className="flex flex-col gap-2 items-center">
+                                <button onClick={() => toggleAvailability(product)} className={cn("inline-flex items-center gap-2 font-bold text-xs uppercase transition-colors", product.isAvailable ? "text-green-600" : "text-gray-400")}>
+                                  {product.isAvailable ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+                                  {product.isAvailable ? 'Available' : 'Sold Out'}
+                                </button>
+                                <button onClick={() => toggleComingSoon(product)} className={cn("inline-flex items-center gap-2 font-bold text-xs uppercase transition-colors", product.isComingSoon ? "text-amber-500" : "text-gray-400")}>
+                                  {product.isComingSoon ? <ToggleRight className="w-6 h-6" /> : <ToggleLeft className="w-6 h-6" />}
+                                  Coming Soon
+                                </button>
+                              </div>
                             </td>
                             {isAdmin && (
                               <td className="p-4 text-right">

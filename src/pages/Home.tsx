@@ -86,7 +86,8 @@ export default function Home() {
 
   // ─── Real-time products listener ───────────────────────────────────────────
   useEffect(() => {
-    const q = query(collection(db, 'products'), where('isAvailable', '==', true));
+    // Fetch all products (shows Available, Sold Out, and Coming Soon)
+    const q = query(collection(db, 'products'));
     const unsub = onSnapshot(q, snap => {
       const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
       setProducts(prods);

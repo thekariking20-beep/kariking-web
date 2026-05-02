@@ -90,6 +90,7 @@ export interface Product {
   minOrderQty?: number;
   stepSize?: number;
   isAvailable: boolean;
+  isComingSoon?: boolean;
   createdAt: string;
 }
 

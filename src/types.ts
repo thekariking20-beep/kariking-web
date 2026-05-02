@@ -30,12 +30,14 @@ export interface User {
 }
 
 export interface UserAddress {
-  id: string; // The generated doc ID
-  tag: 'home' | 'work' | 'other';
-  fullAddress: string;
-  locationLat?: number;
-  locationLng?: number;
-  isDefault: boolean; // True synchronizes back to root user.address
+  id: string;
+  name: 'Home' | 'Work' | 'Other';
+  street: string;
+  city: string;
+  pincode: string;
+  state: string;
+  fullAddress: string;   // Auto-computed: `${street}, ${city} - ${pincode}`
+  isDefault: boolean;
   createdAt: string;
 }
 

@@ -11,26 +11,26 @@ interface AddressContextType {
   selectedAddress: UserAddress | null;
   /** Loading state */
   loading: boolean;
-  /** Set an address as the default (updates Firestore + user doc + local state) */
+  /** Set an address as the default */
   setDefaultAddress: (address: UserAddress) => Promise<void>;
   /** Save a new address or update an existing one */
   saveAddress: (address: Omit<UserAddress, 'createdAt'> & { createdAt?: string }) => Promise<void>;
   /** Delete an address */
   deleteAddress: (id: string) => Promise<void>;
-  /** Display string for the header */
+  /** Display string for the header — first line (street) */
   displayLocation: string;
-  /** Sub-display for city */
+  /** Sub-display — city + pincode */
   displayCity: string;
 }
 
 const AddressContext = createContext<AddressContextType | undefined>(undefined);
 
 export function AddressProvider({ children }: { children: React.ReactNode }) {
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const [addresses, setAddresses] = useState<UserAddress[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ─── Real-time listener on addresses subcollection ─────────────────────────
+  // ─── Real-time listener on users/{uid}/addresses ──────────────────────────
   useEffect(() => {
     if (!user || user.uid.startsWith('demo-')) {
       setAddresses([]);
@@ -38,22 +38,9 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const q = query(collection(db, `addresses/${user.uid}/userAddresses`));
+    const q = query(collection(db, `users/${user.uid}/addresses`));
     const unsub = onSnapshot(q, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }) as UserAddress);
-
-      // Inject legacy root address if the subcollection is completely empty but root user profile has one
-      if (data.length === 0 && user?.address) {
-        data.push({
-          id: user.selectedAddressId || 'legacy-address',
-          tag: 'other',
-          fullAddress: user.address,
-          locationLat: user.locationLat,
-          locationLng: user.locationLng,
-          createdAt: new Date().toISOString(),
-          isDefault: true // Just type compliance
-        });
-      }
 
       // Sort: selected first, then by createdAt desc
       data.sort((a, b) => {
@@ -76,26 +63,22 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
 
   // ─── Display strings for header ────────────────────────────────────────────
   const displayLocation = selectedAddress
-    ? selectedAddress.fullAddress.split(',')[0].trim()
-    : user?.address
-    ? user.address.split(',')[0].trim()
+    ? selectedAddress.street || selectedAddress.fullAddress.split(',')[0].trim()
     : 'Set Location';
 
   const displayCity = selectedAddress
-    ? selectedAddress.fullAddress.split(',').slice(1).join(',').trim() || 'Tamil Nadu'
-    : user?.address
-    ? user.address.split(',').slice(1).join(',').trim() || 'Tamil Nadu'
+    ? `${selectedAddress.city || ''} - ${selectedAddress.pincode || ''}`.replace(/^ - $/, 'Tamil Nadu')
     : 'Tap to set address';
 
   // ─── Set default address ───────────────────────────────────────────────────
   const setDefaultAddress = useCallback(async (address: UserAddress) => {
     if (!user || user.uid.startsWith('demo-')) return;
 
-    // Direct single source of truth dispatch -> updates user doc, triggering live UI rerenders
+    // Update selectedAddressId + defaultAddress (single source of truth sync)
     await updateDoc(doc(db, 'users', user.uid), {
       selectedAddressId: address.id,
+      address: address.fullAddress,
     });
-
   }, [user]);
 
   // ─── Save address ─────────────────────────────────────────────────────────
@@ -111,26 +94,36 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
       createdAt: address.createdAt || new Date().toISOString(),
     };
 
-    await setDoc(doc(db, `addresses/${user.uid}/userAddresses`, refId), newAddress);
+    // Save to users/{uid}/addresses/{id}
+    await setDoc(doc(db, `users/${user.uid}/addresses`, refId), newAddress);
 
-    // If this is the user's first address, or explicitly requested to be default, select it instantly
+    // If first address or explicitly default, sync to user root doc
     if (isFirst || address.isDefault) {
-      await updateDoc(doc(db, 'users', user.uid), { selectedAddressId: refId });
+      await updateDoc(doc(db, 'users', user.uid), {
+        selectedAddressId: refId,
+        address: newAddress.fullAddress,
+      });
     }
   }, [user, addresses]);
 
   // ─── Delete address ───────────────────────────────────────────────────────
   const deleteAddress = useCallback(async (id: string) => {
     if (!user || user.uid.startsWith('demo-')) return;
-    await deleteDoc(doc(db, `addresses/${user.uid}/userAddresses`, id));
-    
-    // Auto fallback -> if the deleted address was selected, wipe selectedAddressId so standard fallback applies
+    await deleteDoc(doc(db, `users/${user.uid}/addresses`, id));
+
+    // Auto fallback if the deleted address was selected
     if (user.selectedAddressId === id) {
       const remaining = addresses.filter(a => a.id !== id);
       if (remaining.length > 0) {
-        await updateDoc(doc(db, 'users', user.uid), { selectedAddressId: remaining[0].id });
+        await updateDoc(doc(db, 'users', user.uid), {
+          selectedAddressId: remaining[0].id,
+          address: remaining[0].fullAddress,
+        });
       } else {
-        await updateDoc(doc(db, 'users', user.uid), { selectedAddressId: null });
+        await updateDoc(doc(db, 'users', user.uid), {
+          selectedAddressId: null,
+          address: null,
+        });
       }
     }
   }, [user, addresses]);

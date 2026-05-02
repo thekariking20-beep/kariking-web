@@ -3,27 +3,22 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ArrowLeft, Plus, MapPin, Trash2, Home, Briefcase, 
-  MapPin as OtherIcon, CheckCircle2 
+  CheckCircle2 
 } from 'lucide-react';
 import { useAddress } from '../context/AddressContext';
 import LocationPickerModal from '../components/location/LocationPickerModal';
 import { cn } from '../lib/utils';
 
+const tagIcons = {
+  Home: <Home className="w-5 h-5" />,
+  Work: <Briefcase className="w-5 h-5" />,
+  Other: <MapPin className="w-5 h-5" />,
+};
+
 export default function ManageAddresses() {
   const navigate = useNavigate();
-  const { addresses, loading, setDefaultAddress, saveAddress, deleteAddress, selectedAddress } = useAddress();
+  const { addresses, loading, setDefaultAddress, deleteAddress, selectedAddress } = useAddress();
   const [showLocationModal, setShowLocationModal] = useState(false);
-
-  const handleSaveLocation = async (addressString: string, lat?: number, lng?: number, tag?: string) => {
-    await saveAddress({
-      id: Date.now().toString(),
-      tag: (tag as 'home' | 'work' | 'other') || 'home',
-      fullAddress: addressString,
-      locationLat: lat,
-      locationLng: lng,
-      isDefault: addresses.length === 0,
-    });
-  };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this address?')) return;
@@ -79,12 +74,13 @@ export default function ManageAddresses() {
                     "w-10 h-10 shrink-0 rounded-xl flex items-center justify-center mt-1",
                     addr.id === selectedAddress?.id ? "bg-red-50 text-[#8B0000]" : "bg-gray-50 text-gray-400"
                   )}>
-                    {addr.tag === 'home' ? <Home className="w-5 h-5"/> : addr.tag === 'work' ? <Briefcase className="w-5 h-5"/> : <OtherIcon className="w-5 h-5"/>}
+                    {tagIcons[addr.name] || <MapPin className="w-5 h-5" />}
                   </div>
                   
                   <div className="flex-1 min-w-0 pr-12">
-                    <h3 className="font-bold text-gray-900 capitalize leading-none mb-1.5">{addr.tag} Address</h3>
-                    <p className="text-sm text-gray-500 leading-snug break-words pr-2">{addr.fullAddress}</p>
+                    <h3 className="font-bold text-gray-900 leading-none mb-1.5">{addr.name}</h3>
+                    <p className="text-sm text-gray-700 font-medium leading-snug">{addr.street}</p>
+                    <p className="text-sm text-gray-500 leading-snug">{addr.city} - {addr.pincode}</p>
                     
                     <div className="mt-4 flex gap-3">
                       {addr.id !== selectedAddress?.id && (
@@ -110,7 +106,6 @@ export default function ManageAddresses() {
           <LocationPickerModal
             isOpen={true}
             onClose={() => setShowLocationModal(false)}
-            onSave={handleSaveLocation}
           />
         )}
       </AnimatePresence>

@@ -36,7 +36,7 @@ export default function Cart() {
   
   // Checkout reads directly from SSOT context
   const address = selectedAddress?.fullAddress || '';
-  const phone = selectedAddress?.phone || user?.phone || '';
+  const phone = user?.phone || '';
   
   const [useCoins, setUseCoins] = useState(false);
   const [error, setError] = useState('');
@@ -99,8 +99,6 @@ export default function Cart() {
       const response = await createOrderFn({
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
         address,
-        locationLat: selectedAddress?.locationLat || user?.locationLat || null,
-        locationLng: selectedAddress?.locationLng || user?.locationLng || null,
         phone,
         useCoins,
         coinsToUse: coinsBeingUsed,
@@ -384,8 +382,11 @@ export default function Cart() {
                 <div className="flex-1 pr-4">
                   {address ? (
                     <>
-                      <h4 className="font-bold text-gray-900 text-sm mb-1">{address.split(',')[0]}</h4>
-                      <p className="text-xs text-gray-500 line-clamp-1">{address.split(',').slice(1).join(',')}</p>
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded">{selectedAddress?.name || 'Home'}</span>
+                      </div>
+                      <h4 className="font-bold text-gray-900 text-sm mb-0.5">{selectedAddress?.street || address.split(',')[0]}</h4>
+                      <p className="text-xs text-gray-500">{selectedAddress?.city || ''} {selectedAddress?.pincode ? `- ${selectedAddress.pincode}` : ''}</p>
                     </>
                   ) : (
                     <p className="text-sm font-bold text-red-600">Please set your delivery location</p>

@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2 } from 'lucide-react';
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -25,13 +25,23 @@ const UPI_NAME = 'KARIKING';
 // import upiQrImage from '../assets/upi-qr.png';
 const upiQrImage: string | null = null; // Set to imported image when ready
 
+// ─── Loading Stage Messages ─────────────────────────────────────────────
+const LOADING_STAGES = [
+  'Securing your order...',
+  'Verifying items & prices...',
+  'Confirming payment method...',
+  'Almost done...',
+];
+
 export default function Cart() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
   const { user, refreshUser } = useAuth();
   const { selectedAddress } = useAddress();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState(0);
   const [orderPlaced, setOrderPlaced] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   // Checkout reads directly from SSOT context
   const address = selectedAddress?.fullAddress || '';
@@ -48,6 +58,9 @@ export default function Cart() {
   const [loadingVerify, setLoadingVerify] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState('');
 
+  // Ref to hold pending checkout data for network recovery
+  const pendingCheckoutRef = useRef<any>(null);
+
   const { width, height } = useWindowSize();
 
   const COIN_VALUE = 20;
@@ -62,9 +75,37 @@ export default function Cart() {
 
   // formatQty imported from lib/units
 
+  // ─── Network Status Listener ──────────────────────────────────────────
+  useEffect(() => {
+    const goOnline = () => {
+      setIsOffline(false);
+      // Auto-retry pending checkout when connection restores
+      if (pendingCheckoutRef.current) {
+        handleCheckout();
+      }
+    };
+    const goOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Loading Stage Animation ──────────────────────────────────────────
+  useEffect(() => {
+    if (!loading) { setLoadingStage(0); return; }
+    const interval = setInterval(() => {
+      setLoadingStage(prev => (prev + 1) % LOADING_STAGES.length);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
+
   // ─── Direct UPI Payment Architecture ──────────────────────────────────
   // Razorpay has been removed. All payments are verified via UTR on direct UPI.
-
 
   const getValidationError = () => {
     if (items.length === 0) return 'Cart empty';
@@ -77,7 +118,7 @@ export default function Cart() {
 
   const validationError = getValidationError();
 
-  // ─── Core Checkout Handler ──────────────────────────────────────────────
+  // ─── Core Checkout Handler (Failure-Proof) ────────────────────────────
   const handleCheckout = async () => {
     if (!user) {
       navigate('/login');
@@ -87,6 +128,14 @@ export default function Cart() {
     if (validationError) {
       setError(validationError);
       return;
+    }
+
+    // Phase 2: Network-aware — check BEFORE attempting
+    if (!navigator.onLine) {
+      setIsOffline(true);
+      // Save intent so we can auto-retry when back online
+      pendingCheckoutRef.current = true;
+      return; // The online listener will call handleCheckout automatically
     }
 
     const rateCheck = checkOrderLimit();
@@ -104,8 +153,7 @@ export default function Cart() {
     setLoading(true);
     setError('');
 
-    // Use existing idempotency key or generate a new one
-    // This ensures retries use the SAME key and do not create duplicates
+    // Phase 5: Idempotent key — reuse across retries, never duplicate
     let iKey = idempotencyKey;
     if (!iKey) {
       iKey = crypto.randomUUID();
@@ -115,9 +163,10 @@ export default function Cart() {
     try {
       const createOrderFn = httpsCallable(functions, 'createOrder');
       
+      // Phase 4: Silent auto-retry with exponential backoff (up to 5 attempts)
       let response;
-      let retries = 3;
-      while (retries > 0) {
+      const MAX_RETRIES = 5;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           response = await createOrderFn({
             items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
@@ -129,28 +178,38 @@ export default function Cart() {
             deliveryFee,
             idempotencyKey: iKey
           });
-          break; // Success
-        } catch (err) {
-          retries--;
-          if (retries === 0) throw err;
-          // Wait 1.5 seconds before auto-retry
-          await new Promise(res => setTimeout(res, 1500));
+          break; // Success — exit retry loop
+        } catch (err: any) {
+          // If it's a validation error from our backend, don't retry
+          const code = err?.code || '';
+          if (['invalid-argument', 'failed-precondition', 'permission-denied', 'unauthenticated'].includes(code)) {
+            throw err; // Business logic error — show to user
+          }
+          // Network/timeout error — silently retry
+          if (attempt === MAX_RETRIES) {
+            // All retries exhausted — save for network recovery
+            pendingCheckoutRef.current = true;
+            throw err;
+          }
+          // Exponential backoff: 1s, 2s, 4s, 8s
+          await new Promise(res => setTimeout(res, Math.min(1000 * Math.pow(2, attempt - 1), 8000)));
         }
       }
 
       const data = response?.data as { success: boolean; orderId: string; finalAmount: number } | undefined;
       
       if (!data || !data.success) {
-        throw new Error("Connection issue, retry.");
+        throw new Error('order-creation-failed');
       }
+
+      // Phase 9: Success guarantee — always navigate to next step
+      pendingCheckoutRef.current = null; // Clear pending
 
       // Direct UPI / QR Flow
       if (effectiveMethod === 'qr' && data.finalAmount > 0) {
-        // Show QR modal — order already created with awaiting_payment status
         setQrOrderId(data.orderId);
         setShowQrModal(true);
         setLoading(false);
-        // Don't clear cart yet, wait for "I have paid" confirmation
         return;
       }
 
@@ -158,7 +217,7 @@ export default function Cart() {
       if (effectiveMethod === 'coins' || data.finalAmount === 0) {
         await refreshUser();
         clearCart();
-        setIdempotencyKey(''); // Clear key on successful complete checkout
+        setIdempotencyKey('');
         setOrderPlaced(true);
         setTimeout(() => {
           navigate('/orders');
@@ -166,7 +225,23 @@ export default function Cart() {
       }
     } catch (err: any) {
       console.error('Checkout error:', err);
-      setError('Connection issue, retry.');
+      // Phase 8: No generic errors — map to specific messages
+      const code = err?.code || '';
+      const msg = err?.message || '';
+      if (code === 'invalid-argument') {
+        setError(msg || 'Some order details are invalid. Please check your cart.');
+      } else if (code === 'failed-precondition') {
+        setError(msg || 'A product in your cart is no longer available.');
+      } else if (code === 'unauthenticated') {
+        navigate('/login');
+      } else if (!navigator.onLine) {
+        setIsOffline(true);
+        pendingCheckoutRef.current = true;
+        // Will auto-retry when connection restores
+      } else {
+        // Exhausted all retries but still online — very rare
+        setError('Taking longer than expected. Please try once more.');
+      }
     } finally {
       setLoading(false);
     }
@@ -491,24 +566,62 @@ export default function Cart() {
             </div>
           )}
 
-          {(error || validationError) && (
-            <div className="bg-red-50 text-[#7A0000] p-3 rounded-lg mb-6 text-xs font-bold border border-red-100 flex items-center gap-2 shadow-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {error || validationError}
-            </div>
-          )}
+          {/* ─── Offline Banner ─────────────────────────────── */}
+          <AnimatePresence>
+            {isOffline && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="bg-orange-50 border border-orange-200 p-4 rounded-xl mb-4 flex items-center gap-3 shadow-sm"
+              >
+                <WifiOff className="w-5 h-5 text-orange-500 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-orange-800">You are offline</p>
+                  <p className="text-[10px] text-orange-600">Your order will be placed automatically when internet reconnects.</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* ─── Validation Error (only user-actionable errors) ── */}
+          <AnimatePresence>
+            {(error || validationError) && !isOffline && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                className="bg-red-50 text-[#7A0000] p-3 rounded-lg mb-4 text-xs font-bold border border-red-100 flex items-center gap-2 shadow-sm"
+              >
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {error || validationError}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <button
             onClick={handleCheckout}
-            disabled={loading || !!validationError}
+            disabled={loading || !!validationError || isOffline}
             className="ripple-btn w-full bg-premium-gradient text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 transition-all shadow-[0_8px_20px_rgba(122,0,0,0.3)] hover:shadow-[0_12px_25px_rgba(122,0,0,0.4)] disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
           >
-            {loading ? 'Processing Securely...' : (
-              canPayFullyWithCoins && useCoins 
-                ? `Pay with Coins — Place Order` 
-                : `Pay ₹${finalTotal} — Place Order`
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                {LOADING_STAGES[loadingStage]}
+              </span>
+            ) : isOffline ? (
+              <span className="flex items-center gap-2">
+                <WifiOff className="w-5 h-5" />
+                Waiting for connection...
+              </span>
+            ) : (
+              <>
+                {canPayFullyWithCoins && useCoins 
+                  ? `Pay with Coins — Place Order` 
+                  : `Pay ₹${finalTotal} — Place Order`}
+                <ArrowRight className="w-5 h-5" />
+              </>
             )}
-            {!loading && <ArrowRight className="w-5 h-5" />}
           </button>
         </div>
       </div>

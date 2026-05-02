@@ -162,12 +162,13 @@ export default function Home() {
         label: mainId,
         icon: '📦',
         color: 'from-gray-500 to-gray-600',
-        order: 999
+        type: 'other',
+        orderPriority: 999
       };
       mains.push(catConfig);
     });
-    // Sort by order
-    return mains.sort((a, b) => (a.order || 99) - (b.order || 99));
+    // Sort by Priority
+    return mains.sort((a, b) => (a.orderPriority ?? 999) - (b.orderPriority ?? 999));
   }, [grouped, MAIN_CATEGORIES]);
 
   return (

@@ -29,7 +29,7 @@ export function CategoriesProvider({ children }: { children: React.ReactNode }) 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'categories'), orderBy('order', 'asc'));
+    const q = query(collection(db, 'categories'), orderBy('orderPriority', 'asc'));
     
     const unsubscribe = onSnapshot(
       q,
@@ -43,7 +43,8 @@ export function CategoriesProvider({ children }: { children: React.ReactNode }) 
               icon: data.icon || '📦',
               color: data.color || 'from-gray-500 to-gray-600',
               isActive: data.isActive !== false, // default true
-              order: data.order ?? 99,
+              type: data.type || 'other',
+              orderPriority: data.orderPriority ?? 999,
               subCategories: (data.subCategories || []).map((s: any) => ({
                 id: s.id || s.label,
                 label: s.label || s.id,

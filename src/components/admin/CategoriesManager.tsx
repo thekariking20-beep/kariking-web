@@ -13,13 +13,14 @@ interface CategoryForm {
   icon: string;
   color: string;
   isActive: boolean;
-  order: number;
+  type: 'meat' | 'masala' | 'pickle' | 'other';
+  orderPriority: number;
   subCategories: { id: string; label: string }[];
 }
 
 const EMPTY_FORM: CategoryForm = {
   id: '', name: '', icon: '📦', color: 'from-gray-500 to-gray-600',
-  isActive: true, order: 99, subCategories: [],
+  isActive: true, type: 'other', orderPriority: 999, subCategories: [],
 };
 
 const COLOR_PRESETS = [
@@ -58,7 +59,8 @@ export default function CategoriesManager() {
           icon: cat.icon,
           color: cat.color,
           isActive: cat.isActive !== false,
-          order: cat.order ?? 99,
+          type: cat.type || 'other',
+          orderPriority: cat.orderPriority ?? 999,
           subCategories: cat.subCategories,
         });
       });
@@ -82,7 +84,8 @@ export default function CategoriesManager() {
         icon: formData.icon,
         color: formData.color,
         isActive: formData.isActive,
-        order: formData.order,
+        type: formData.type,
+        orderPriority: formData.orderPriority,
         subCategories: formData.subCategories,
       });
       resetForm();
@@ -110,7 +113,8 @@ export default function CategoriesManager() {
         icon: cat.icon,
         color: cat.color,
         isActive: !cat.isActive,
-        order: cat.order ?? 99,
+        type: cat.type || 'other',
+        orderPriority: cat.orderPriority ?? 999,
         subCategories: cat.subCategories,
       });
     } catch (e: any) {
@@ -125,7 +129,8 @@ export default function CategoriesManager() {
       icon: cat.icon,
       color: cat.color,
       isActive: cat.isActive !== false,
-      order: cat.order ?? 99,
+      type: cat.type || 'other',
+      orderPriority: cat.orderPriority ?? 999,
       subCategories: [...cat.subCategories],
     });
     setEditing(true);
@@ -245,14 +250,28 @@ export default function CategoriesManager() {
                     onChange={(e) => setFormData({ ...formData, icon: e.target.value })}
                   />
                 </div>
-                {/* Order */}
+                {/* Type */}
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5">Display Order</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5">Category Type</label>
+                  <select
+                    className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50/50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-medium text-sm"
+                    value={formData.type}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
+                  >
+                    <option value="meat">Meat (Core)</option>
+                    <option value="masala">Masala</option>
+                    <option value="pickle">Pickle</option>
+                    <option value="other">Other / Snack</option>
+                  </select>
+                </div>
+                {/* Priority */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5">Priority (Lower = First)</label>
                   <input
                     type="number"
                     className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50/50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-medium text-sm"
-                    value={formData.order}
-                    onChange={(e) => setFormData({ ...formData, order: parseInt(e.target.value) || 0 })}
+                    value={formData.orderPriority}
+                    onChange={(e) => setFormData({ ...formData, orderPriority: parseInt(e.target.value) || 0 })}
                   />
                 </div>
               </div>
@@ -372,8 +391,12 @@ export default function CategoriesManager() {
                       <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 uppercase tracking-widest">Disabled</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {cat.subCategories.length} sub-categories • Order: {cat.order ?? '—'}
+                  <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
+                    <span>{cat.subCategories.length} sub-categories</span>
+                    <span>•</span>
+                    <span className="capitalize text-gray-500 font-medium">Type: {cat.type || 'other'}</span>
+                    <span>•</span>
+                    <span className="text-gray-500 font-medium">Priority: {cat.orderPriority ?? 999}</span>
                   </p>
                 </div>
 

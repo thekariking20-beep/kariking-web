@@ -14,7 +14,8 @@ export interface MainCategory {
   icon: string;       // emoji icon
   color: string;      // tailwind gradient classes
   isActive?: boolean;
-  order?: number;
+  type?: 'meat' | 'masala' | 'pickle' | 'other';
+  orderPriority?: number;
   subCategories: SubCategory[];
 }
 
@@ -25,7 +26,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🍗',
     color: 'from-amber-500 to-orange-500',
     isActive: true,
-    order: 0,
+    type: 'meat',
+    orderPriority: 1,
     subCategories: [
       { id: 'Country Chicken', label: 'Country Chicken', labelTamil: 'நாட்டு கோழி' },
       { id: 'Broiler Chicken', label: 'Broiler Chicken' },
@@ -39,10 +41,23 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🥩',
     color: 'from-red-600 to-rose-700',
     isActive: true,
-    order: 1,
+    type: 'meat',
+    orderPriority: 2,
     subCategories: [
       { id: 'Goat Curry Cut', label: 'Goat Curry Cut' },
       { id: 'Boneless Mutton', label: 'Boneless Mutton' },
+    ],
+  },
+  {
+    id: 'Turkey',
+    label: 'Turkey',
+    icon: '🦃',
+    color: 'from-amber-600 to-amber-800',
+    isActive: true,
+    type: 'meat',
+    orderPriority: 3,
+    subCategories: [
+      { id: 'Turkey Meat', label: 'Turkey Meat' },
     ],
   },
   {
@@ -51,46 +66,12 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🐟',
     color: 'from-blue-500 to-cyan-600',
     isActive: true,
-    order: 2,
+    type: 'meat',
+    orderPriority: 4,
     subCategories: [
       { id: 'Nethili', label: 'Nethili' },
       { id: 'Vanjaram', label: 'Vanjaram' },
       { id: 'Sankara', label: 'Sankara' },
-    ],
-  },
-  {
-    id: 'Crab',
-    label: 'Crab',
-    icon: '🦀',
-    color: 'from-orange-500 to-red-500',
-    isActive: true,
-    order: 3,
-    subCategories: [
-      { id: 'Nandu (Crab)', label: 'Nandu (Crab)' },
-    ],
-  },
-  {
-    id: 'Eggs',
-    label: 'Eggs',
-    icon: '🥚',
-    color: 'from-yellow-400 to-amber-500',
-    isActive: true,
-    order: 4,
-    subCategories: [
-      { id: 'Country Eggs', label: 'Country Eggs' },
-      { id: 'Farm Eggs', label: 'Farm Eggs' },
-    ],
-  },
-  {
-    id: 'Milk',
-    label: 'Milk',
-    icon: '🥛',
-    color: 'from-sky-400 to-blue-500',
-    isActive: true,
-    order: 5,
-    subCategories: [
-      { id: 'Cow Milk', label: 'Cow Milk', labelTamil: 'பசும்பால்' },
-      { id: 'Goat Milk', label: 'Goat Milk', labelTamil: 'ஆட்டுப்பால்' },
     ],
   },
   {
@@ -99,7 +80,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🐇',
     color: 'from-stone-500 to-stone-700',
     isActive: true,
-    order: 5,
+    type: 'meat',
+    orderPriority: 5,
     subCategories: [
       { id: 'Rabbit Meat', label: 'Rabbit Meat' },
     ],
@@ -110,21 +92,49 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🐦',
     color: 'from-teal-500 to-teal-700',
     isActive: true,
-    order: 6,
+    type: 'meat',
+    orderPriority: 6,
     subCategories: [
       { id: 'Quail Meat', label: 'Quail Meat' },
       { id: 'Quail Eggs', label: 'Quail Eggs' },
     ],
   },
   {
-    id: 'Turkey',
-    label: 'Turkey',
-    icon: '🦃',
-    color: 'from-amber-600 to-amber-800',
+    id: 'Milk',
+    label: 'Milk',
+    icon: '🥛',
+    color: 'from-sky-400 to-blue-500',
     isActive: true,
-    order: 7,
+    type: 'other',
+    orderPriority: 7,
     subCategories: [
-      { id: 'Turkey Meat', label: 'Turkey Meat' },
+      { id: 'Cow Milk', label: 'Cow Milk', labelTamil: 'பசும்பால்' },
+      { id: 'Goat Milk', label: 'Goat Milk', labelTamil: 'ஆட்டுப்பால்' },
+    ],
+  },
+  {
+    id: 'Eggs',
+    label: 'Eggs',
+    icon: '🥚',
+    color: 'from-yellow-400 to-amber-500',
+    isActive: true,
+    type: 'other',
+    orderPriority: 8,
+    subCategories: [
+      { id: 'Country Eggs', label: 'Country Eggs' },
+      { id: 'Farm Eggs', label: 'Farm Eggs' },
+    ],
+  },
+  {
+    id: 'Crab',
+    label: 'Crab',
+    icon: '🦀',
+    color: 'from-orange-500 to-red-500',
+    isActive: true,
+    type: 'meat',
+    orderPriority: 9,
+    subCategories: [
+      { id: 'Nandu (Crab)', label: 'Nandu (Crab)' },
     ],
   },
   {
@@ -133,7 +143,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🦆',
     color: 'from-emerald-500 to-green-700',
     isActive: true,
-    order: 8,
+    type: 'meat',
+    orderPriority: 10,
     subCategories: [
       { id: 'Duck Meat', label: 'Duck Meat' },
       { id: 'Duck Eggs', label: 'Duck Eggs' },
@@ -145,7 +156,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🌶️',
     color: 'from-orange-600 to-red-600',
     isActive: true,
-    order: 9,
+    type: 'masala',
+    orderPriority: 50,
     subCategories: [
       { id: 'Chicken Masala', label: 'Chicken Masala' },
       { id: 'Mutton Masala', label: 'Mutton Masala' },
@@ -160,7 +172,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🫙',
     color: 'from-green-600 to-emerald-600',
     isActive: true,
-    order: 10,
+    type: 'pickle',
+    orderPriority: 60,
     subCategories: [
       { id: 'Chicken Pickle', label: 'Chicken Pickle' },
       { id: 'Mutton Pickle', label: 'Mutton Pickle' },
@@ -176,7 +189,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🍟',
     color: 'from-yellow-500 to-orange-500',
     isActive: true,
-    order: 11,
+    type: 'other',
+    orderPriority: 70,
     subCategories: [
       { id: 'Chips', label: 'Chips' },
       { id: 'Murukku', label: 'Murukku' },
@@ -190,7 +204,8 @@ export const MAIN_CATEGORIES: MainCategory[] = [
     icon: '🍖',
     color: 'from-purple-500 to-indigo-600',
     isActive: true,
-    order: 99,
+    type: 'other',
+    orderPriority: 999,
     subCategories: [],
   },
 ];

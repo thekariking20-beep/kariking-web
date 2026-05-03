@@ -643,34 +643,34 @@ export default function Cart() {
                 <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
               </div>
 
-              {/* UPI App Buttons (mobile deep links + desktop fallback) */}
+              {/* UPI App Buttons — local icons, correct deep links */}
               <div className="mb-4 grid grid-cols-4 gap-2">
                 <a
-                  href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                  href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-6 w-6 object-contain" />
+                  <img src="/gpay.jpeg" alt="GPay" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">GPay</span>
                 </a>
                 <a
-                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
-                  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-6 w-6 object-contain" />
+                  <img src="/phonepe.jpeg" alt="PhonePe" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">PhonePe</span>
                 </a>
                 <a
-                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-5 w-6 object-contain" />
+                  <img src="/paytm.jpeg" alt="Paytm" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">Paytm</span>
                 </a>
                 <a
                   href={upiString}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
-                  <Smartphone className="w-5 h-5 text-gray-500" />
+                  <Smartphone className="w-6 h-6 text-gray-500" />
                   <span className="text-[9px] font-bold text-gray-600">Others</span>
                 </a>
               </div>

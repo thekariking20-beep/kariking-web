@@ -268,6 +268,9 @@ export default function Login() {
       return;
     }
 
+    // Clear any stale password-change flag from previous session
+    sessionStorage.removeItem('kk_changing_password');
+
     setLoading(true);
     try {
       const formattedPhone = `+91${phoneNumber.replace(/\D/g, '')}`;
@@ -410,7 +413,8 @@ export default function Login() {
         return;
       }
 
-      // Auth is complete — LoginRoute will auto-redirect to the correct dashboard
+      // Navigate to the correct dashboard
+      navigate(staffData.role === 'delivery' ? '/delivery' : '/admin');
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Login failed. Please try again.');

@@ -408,7 +408,7 @@ export default function Admin() {
         </div>
 
         {/* Page Content */}
-        <div className="p-4 lg:p-8">
+        <div className="p-4 lg:p-8 admin-safe-bottom">
           {loading ? (
              <div className="flex items-center justify-center h-48">Loading...</div>
           ) : (
@@ -994,6 +994,34 @@ export default function Admin() {
             </motion.div>
           </AnimatePresence>
           )}
+        </div>
+
+        {/* ─── MOBILE BOTTOM NAV (admin) ─────────────────────────────── */}
+        <div className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-gray-900/95 backdrop-blur-xl border-t border-white/10">
+          <nav className="flex justify-around items-center px-1 py-1.5 pb-safe">
+            {[
+              { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+              { id: 'orders', label: 'Orders', icon: ShoppingCart },
+              { id: 'products', label: 'Products', icon: Package },
+              { id: 'users', label: 'Users', icon: Users },
+              { id: 'settings', label: 'Settings', icon: Settings },
+            ].filter(t => t.id !== 'users' || isAdmin).map(tab => {
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={cn(
+                    "flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all",
+                    isActive ? "text-red-400" : "text-gray-500"
+                  )}
+                >
+                  <tab.icon className={cn("w-5 h-5", isActive && "text-red-400")} strokeWidth={isActive ? 2.5 : 1.8} />
+                  <span className={cn("text-[8px] font-bold uppercase tracking-wider", isActive && "text-red-400")}>{tab.label}</span>
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
     </div>

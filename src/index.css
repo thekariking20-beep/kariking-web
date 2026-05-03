@@ -14,6 +14,17 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* ── Safe Area Utilities (iPhone + Android nav) ─────────────── */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-bottom {
+  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+}
+.admin-safe-bottom {
+  padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+}
+
 /* Shimmer animation for premium buttons */
 @keyframes shimmer {
   0% { transform: translateX(-100%); }

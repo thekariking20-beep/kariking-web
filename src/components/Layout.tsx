@@ -112,7 +112,7 @@ export default function Layout() {
       <main className={cn(
         'flex-1 w-full',
         isAdminPage ? '' :
-        isDeliveryPage ? '' : 'max-w-7xl mx-auto px-4 py-6 pb-24 md:py-8 md:pb-8'
+        isDeliveryPage ? 'safe-bottom' : 'max-w-7xl mx-auto px-4 py-6 md:py-8 md:pb-8 safe-bottom'
       )}>
         <Outlet />
       </main>

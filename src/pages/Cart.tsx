@@ -630,65 +630,50 @@ export default function Cart() {
                 <p className="text-3xl font-black text-green-700 my-1">₹{finalTotal}</p>
               </div>
 
-              {/* QR Code — INSTANT client-side generation */}
-              {!isMobile && (
-                <div className="bg-white rounded-2xl p-4 mb-4 flex flex-col items-center justify-center border-2 border-gray-100 shadow-inner">
-                  {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="UPI QR Code" className="w-[240px] h-[240px] rounded-xl" />
-                  ) : (
-                    <div className="w-[240px] h-[240px] flex items-center justify-center">
-                      <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
-                    </div>
-                  )}
-                  <p className="text-xs text-gray-400 font-medium mt-3">Scan with any UPI app</p>
-                  <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
-                </div>
-              )}
+              {/* QR Code — ALWAYS VISIBLE on top */}
+              <div className="bg-white rounded-2xl p-4 mb-4 flex flex-col items-center justify-center border-2 border-gray-100 shadow-inner">
+                {qrDataUrl ? (
+                  <img src={qrDataUrl} alt="UPI QR Code" className="w-[220px] h-[220px] rounded-xl" />
+                ) : (
+                  <div className="w-[220px] h-[220px] flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
+                  </div>
+                )}
+                <p className="text-xs text-gray-400 font-medium mt-2">Scan with any UPI app</p>
+                <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
+              </div>
 
-              {/* Mobile UPI Deep Links */}
-              {isMobile && (
-                <div className="mb-4 space-y-2">
-                  <a
-                    href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                    className="w-full bg-white border-2 border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
-                  >
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-6 w-6 object-contain" />
-                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with Google Pay</span>
-                    <ArrowRight className="w-4 h-4 text-gray-400" />
-                  </a>
-                  <a
-                    href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                    className="w-full bg-white border-2 border-gray-100 hover:border-purple-200 hover:bg-purple-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
-                  >
-                    <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-6 w-6 object-contain" />
-                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with PhonePe</span>
-                    <ArrowRight className="w-4 h-4 text-gray-400" />
-                  </a>
-                  <a
-                    href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                    className="w-full bg-white border-2 border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
-                  >
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-5 w-6 object-contain" />
-                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with Paytm</span>
-                    <ArrowRight className="w-4 h-4 text-gray-400" />
-                  </a>
-                  {/* Universal UPI fallback */}
-                  <a
-                    href={upiString}
-                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center justify-center gap-2 text-xs font-bold text-gray-500 hover:bg-gray-100 transition-colors"
-                  >
-                    <Smartphone className="w-4 h-4" />
-                    Open other UPI app
-                  </a>
-                  {/* Fallback QR for mobile too */}
-                  <details className="mt-2">
-                    <summary className="text-[10px] text-center text-gray-400 font-medium cursor-pointer hover:text-gray-600">Can't open app? Show QR code</summary>
-                    <div className="mt-2 flex justify-center">
-                      {qrDataUrl && <img src={qrDataUrl} alt="UPI QR" className="w-[200px] h-[200px] rounded-xl border border-gray-100" />}
-                    </div>
-                  </details>
-                </div>
-              )}
+              {/* UPI App Buttons (mobile deep links + desktop fallback) */}
+              <div className="mb-4 grid grid-cols-4 gap-2">
+                <a
+                  href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-6 w-6 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600">GPay</span>
+                </a>
+                <a
+                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-6 w-6 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600">PhonePe</span>
+                </a>
+                <a
+                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-5 w-6 object-contain" />
+                  <span className="text-[9px] font-bold text-gray-600">Paytm</span>
+                </a>
+                <a
+                  href={upiString}
+                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors"
+                >
+                  <Smartphone className="w-5 h-5 text-gray-500" />
+                  <span className="text-[9px] font-bold text-gray-600">Others</span>
+                </a>
+              </div>
 
               {/* UTR Input Field */}
               <div className="mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200">

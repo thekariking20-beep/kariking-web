@@ -61,6 +61,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, async (fUser) => {
       setFirebaseUser(fUser);
+      try {
       if (fUser) {
         // Determine auth method: email-based = password login; phone-based = OTP login
         const isPasswordAuth = !!fUser.email?.endsWith('@kariking.staff');
@@ -101,7 +102,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           // New UID — but check if this phone already has a user doc (PREVENT DUPLICATES)
           const referredBy = localStorage.getItem('pendingReferralCode');
-          // phoneNumber and isPasswordAuth are already available from the outer scope (line 67-76)
 
           // ─── PHONE UNIQUENESS GUARD ─────────────────────────────────
           // Check if a user doc already exists for this phone under a DIFFERENT UID
@@ -111,11 +111,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             
             if (!existingSnap.empty) {
               // Found existing user doc(s) for this phone — migrate to current UID
-              // Pick the best doc: prefer the one with most data
               const existingDocs = existingSnap.docs.sort((a, b) => {
                 const aData = a.data();
                 const bData = b.data();
-                // Prefer docs with names, then by createdAt descending
                 if (aData.name && !bData.name) return -1;
                 if (!aData.name && bData.name) return 1;
                 return (bData.createdAt || '').localeCompare(aData.createdAt || '');
@@ -127,7 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               // Migrate: create doc under new UID, delete old ones
               const migratedUser: User = {
                 ...bestData,
-                uid: fUser.uid, // Update UID to current auth UID
+                uid: fUser.uid,
               };
               
               await setDoc(doc(db, 'users', fUser.uid), migratedUser);
@@ -146,23 +144,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               
               setUser(migratedUser);
               registerPushNotifications(fUser.uid).catch(() => {});
-              setLoading(false);
               return; // Skip normal user creation — we migrated
             }
           }
 
           // ─── NORMAL NEW USER CREATION (no existing phone found) ──────
-          // Check for provisioning (staff pre-registered by admin)
           let assignedRole: User['role'] = 'user';
-          let profileComplete = false; // ALL new users must complete onboarding
+          let profileComplete = false;
           
-          // Check if this is the hardcoded admin phone
           if (phoneNumber === ADMIN_PHONE) {
             assignedRole = 'admin';
-            profileComplete = true; // Admin bypasses onboarding
+            profileComplete = true;
           }
 
-          // Check provisionedStaff collection
           if (phoneNumber) {
             const provDoc = await getDoc(doc(db, 'provisionedStaff', phoneNumber));
             if (provDoc.exists() && provDoc.data().status === 'pending') {
@@ -188,12 +182,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           // Handle referral rewards
           if (referredBy) {
+            try {
             const referrersQuery = query(collection(db, 'users'), where('referralCode', '==', referredBy));
             const referrerSnap = await getDocs(referrersQuery);
             if (!referrerSnap.empty) {
               const referrerDoc = referrerSnap.docs[0];
               
-              // Fraud prevention: Block self-referral
               const isSelfReferral = referrerDoc.id === fUser.uid || 
                 referrerDoc.data().phone === phoneNumber;
               
@@ -212,21 +206,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   rewardGiven: false,
                   createdAt: new Date().toISOString()
                 });
-              } else {
-                console.warn('🚫 Self-referral blocked:', phoneNumber);
               }
+            }
+            } catch (refErr) {
+              console.error('Referral processing failed (non-blocking):', refErr);
             }
             localStorage.removeItem('pendingReferralCode');
           }
           
           setUser(newUser);
-          // Register FCM token for new user
           registerPushNotifications(fUser.uid).catch(() => {});
         }
       } else {
         setUser(null);
       }
-      setLoading(false);
+      } catch (err) {
+        console.error('🔴 AuthContext: Failed to resolve user:', err);
+        // Still set user to null so the app doesn't hang on the loader forever
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();

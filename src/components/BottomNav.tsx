@@ -1,23 +1,41 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Home, Drumstick, CalendarDays, Tag, ShoppingCart } from 'lucide-react';
+import { Home, Drumstick, CalendarDays, Tag, ShoppingCart, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { cn } from '../lib/utils';
 
-const TABS = [
-  { label: 'Home',     path: '/',         icon: Home,       active: (p: string) => p === '/'        },
-  { label: 'Meats',    path: '/products', icon: Drumstick,  active: (p: string) => p === '/products' },
-  { label: 'Bookings', path: '/bookings', icon: CalendarDays, active: (p: string) => p === '/bookings' },
-  { label: 'Deals',    path: '/referral', icon: Tag,        active: (p: string) => p === '/referral'  },
-  { label: 'Cart',     path: '/cart',     icon: ShoppingCart, active: (p: string) => p === '/cart'   },
+type TabDef = {
+  label: string;
+  path: string;
+  icon: React.ElementType;
+  active: (p: string) => boolean;
+  adminOnly?: boolean;
+  needsAuth?: boolean;
+};
+
+const TABS: TabDef[] = [
+  { label: 'Home',     path: '/',         icon: Home,          active: (p) => p === '/'        },
+  { label: 'Meats',    path: '/products', icon: Drumstick,     active: (p) => p === '/products' },
+  { label: 'Bookings', path: '/bookings', icon: CalendarDays,  active: (p) => p === '/bookings', needsAuth: true },
+  { label: 'Deals',    path: '/referral', icon: Tag,           active: (p) => p === '/referral', needsAuth: true },
+  { label: 'Cart',     path: '/cart',     icon: ShoppingCart,  active: (p) => p === '/cart'   },
+  { label: 'Admin',    path: '/admin',    icon: LayoutDashboard, active: (p) => p === '/admin', adminOnly: true },
 ];
 
 export default function BottomNav() {
-  const { user } = useAuth();
+  const { user, isAdmin, isManager } = useAuth();
   const { totalItems } = useCart();
   const location = useLocation();
+
+  const isAdminOrManager = isAdmin || isManager;
+
+  // Filter tabs: show admin tab only for admin/manager
+  const visibleTabs = TABS.filter(tab => {
+    if (tab.adminOnly && !isAdminOrManager) return false;
+    return true;
+  });
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50">
@@ -25,11 +43,10 @@ export default function BottomNav() {
       <div className="bg-white/95 backdrop-blur-xl shadow-[0_-4px_30px_rgba(0,0,0,0.12)] border-t border-gray-100">
         <nav className="max-w-md mx-auto px-2 py-1.5 pb-safe">
           <div className="flex justify-around items-center">
-            {TABS.map(tab => {
+            {visibleTabs.map(tab => {
               const isActive = tab.active(location.pathname);
               const Icon = tab.icon;
-              const needsAuth = tab.path === '/bookings' || tab.path === '/referral';
-              const to = needsAuth && !user ? '/login' : tab.path;
+              const to = (tab.needsAuth && !user) ? '/login' : tab.path;
 
               return (
                 <Link key={tab.path} to={to} className="relative flex-1 flex flex-col items-center py-2 group">
@@ -37,7 +54,12 @@ export default function BottomNav() {
                   {isActive && (
                     <motion.div
                       layoutId="bottom-nav-pill"
-                      className="absolute inset-0 mx-1 bg-premium-gradient rounded-xl shadow-[0_5px_20px_rgba(122,0,0,0.4)]"
+                      className={cn(
+                        "absolute inset-0 mx-1 rounded-xl shadow-lg",
+                        tab.adminOnly
+                          ? "bg-gradient-to-r from-gray-900 to-gray-800 shadow-gray-900/40"
+                          : "bg-premium-gradient shadow-[0_5px_20px_rgba(122,0,0,0.4)]"
+                      )}
                       transition={{ type: 'spring', stiffness: 500, damping: 35 }}
                     />
                   )}

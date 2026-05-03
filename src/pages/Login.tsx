@@ -89,16 +89,6 @@ export default function Login() {
   const navigate = useNavigate();
   const otpFormRef = useRef<HTMLFormElement>(null);
 
-  // ─── Auto-redirect if already logged in ───────────────────────
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        navigate('/', { replace: true });
-      }
-    });
-    return () => unsubscribe();
-  }, [navigate]);
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
@@ -406,13 +396,15 @@ export default function Login() {
 
       // If must change password, go to change password screen
       if (staffData.mustChangePassword) {
+        // Set flag so LoginRoute doesn't redirect while changing password
+        sessionStorage.setItem('kk_changing_password', 'true');
         setStep('change-password');
         setLoading(false);
         return;
       }
 
-      // Navigate — AuthContext handles the rest
-      navigate(staffData.role === 'delivery' ? '/delivery' : '/admin');
+      // LoginRoute will auto-redirect to the correct dashboard
+      // since the user is now authenticated
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Login failed. Please try again.');
@@ -451,7 +443,8 @@ export default function Login() {
         mustChangePassword: false,
       });
 
-      // Navigate to appropriate dashboard
+      // Clear the password-change flag and navigate
+      sessionStorage.removeItem('kk_changing_password');
       navigate(staffRole === 'delivery' ? '/delivery' : '/admin');
     } catch (err: any) {
       console.error(err);

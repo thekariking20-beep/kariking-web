@@ -73,10 +73,18 @@ function ProtectedRoute({
 
 // ─── Login Route Guard — redirect to home if already logged in ────────────────
 function LoginRoute() {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin, isDelivery } = useAuth();
   
   if (loading) return <FullScreenLoader isVisible />;
-  if (user) return <Navigate to="/" replace />;
+  
+  // Don't redirect if login page is in the middle of a password-change flow
+  const isChangingPassword = sessionStorage.getItem('kk_changing_password') === 'true';
+  if (user && !isChangingPassword) {
+    // Route staff to their dashboard, regular users to home
+    if (isAdmin) return <Navigate to="/admin" replace />;
+    if (isDelivery) return <Navigate to="/delivery" replace />;
+    return <Navigate to="/" replace />;
+  }
   
   return <Login />;
 }

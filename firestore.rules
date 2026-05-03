@@ -31,6 +31,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow read: if isDashboardUser();
+      // Allow authenticated users to query by phone (needed for UID migration in AuthContext)
+      allow read: if isAuthenticated();
 
       // Users can update their own profile, but CANNOT touch financial fields
       allow update: if isOwner(userId) &&

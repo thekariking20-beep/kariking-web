@@ -234,6 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     localStorage.removeItem('hasSeenWelcome');
+    sessionStorage.removeItem('kk_changing_password');
     if (localStorage.getItem('DEMO_MODE_ROLE')) {
       localStorage.removeItem('DEMO_MODE_ROLE');
       setUser(null);

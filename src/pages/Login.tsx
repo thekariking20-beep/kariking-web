@@ -240,8 +240,8 @@ export default function Login() {
       clearResendCount();
       // Clear welcome flag so fireworks animation plays on home
       localStorage.removeItem('hasSeenWelcome');
-      // Navigate to home — AuthContext will handle redirects based on profileComplete
-      navigate('/');
+      // AuthContext + LoginRoute will auto-redirect once user resolves
+      // No manual navigate needed — LoginRoute handles it
     } catch (err: any) {
       console.error(err);
       const verifyStatus = recordVerifyAttempt();
@@ -357,23 +357,28 @@ export default function Login() {
         }
       }
 
-      // If sign-in failed, the Firebase Auth password may be out of sync with Firestore hash.
-      // For master admin: try default password as fallback before creating a new account.
-      if (!signedIn && formattedPhone === '+916380886374') {
+      // If sign-in failed, Firebase Auth password may be out of sync with Firestore hash.
+      // Try the default password for any staff account as recovery fallback.
+      if (!signedIn) {
+        const defaultPassword = formattedPhone === '+916380886374' ? 'Admin@123' : 'Staff@123';
         for (const email of emailFormats) {
           try {
-            await signInWithEmailAndPassword(auth, email, 'Admin@123');
+            await signInWithEmailAndPassword(auth, email, defaultPassword);
             signedIn = true;
             // Sync the Firebase Auth password to match what user entered
-            if (password !== 'Admin@123') {
-              await updatePassword(auth.currentUser!, password);
+            if (password !== defaultPassword) {
+              try {
+                await updatePassword(auth.currentUser!, password);
+              } catch (syncErr) {
+                console.warn('Could not sync Firebase Auth password:', syncErr);
+              }
             }
             break;
           } catch { continue; }
         }
       }
 
-      // Last resort: create a new Firebase Auth account
+      // Last resort: create a new Firebase Auth account for this staff member
       if (!signedIn) {
         try {
           const { createUserWithEmailAndPassword } = await import('firebase/auth');
@@ -381,7 +386,7 @@ export default function Login() {
           signedIn = true;
         } catch (createErr: any) {
           if (createErr.code === 'auth/email-already-in-use') {
-            setError('Password is out of sync. Go to Firebase Console → Authentication, find the admin email, and reset its password.');
+            setError('Password is out of sync with Firebase Auth. Please contact admin to reset your account.');
             setLoading(false);
             return;
           }
@@ -393,6 +398,8 @@ export default function Login() {
       }
 
       clearFailedLogin();
+      // Clear welcome flag so fireworks animation plays
+      localStorage.removeItem('hasSeenWelcome');
 
       // If must change password, go to change password screen
       if (staffData.mustChangePassword) {
@@ -403,8 +410,7 @@ export default function Login() {
         return;
       }
 
-      // LoginRoute will auto-redirect to the correct dashboard
-      // since the user is now authenticated
+      // Auth is complete — LoginRoute will auto-redirect to the correct dashboard
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Login failed. Please try again.');

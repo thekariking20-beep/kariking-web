@@ -996,32 +996,50 @@ export default function Admin() {
           )}
         </div>
 
-        {/* ─── MOBILE BOTTOM NAV (admin) ─────────────────────────────── */}
-        <div className="fixed bottom-0 left-0 right-0 z-50 lg:hidden bg-gray-900/95 backdrop-blur-xl border-t border-white/10">
-          <nav className="flex justify-around items-center px-1 py-1.5 pb-safe">
-            {[
-              { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-              { id: 'orders', label: 'Orders', icon: ShoppingCart },
-              { id: 'products', label: 'Products', icon: Package },
-              { id: 'users', label: 'Users', icon: Users },
-              { id: 'settings', label: 'Settings', icon: Settings },
-            ].filter(t => t.id !== 'users' || isAdmin).map(tab => {
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)}
-                  className={cn(
-                    "flex-1 flex flex-col items-center gap-0.5 py-2 rounded-xl transition-all",
-                    isActive ? "text-red-400" : "text-gray-500"
-                  )}
-                >
-                  <tab.icon className={cn("w-5 h-5", isActive && "text-red-400")} strokeWidth={isActive ? 2.5 : 1.8} />
-                  <span className={cn("text-[8px] font-bold uppercase tracking-wider", isActive && "text-red-400")}>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+        {/* ─── ADMIN MOBILE BOTTOM NAV (z-9999, role-gated) ──────────── */}
+        <div className="fixed bottom-0 left-0 right-0 lg:hidden" style={{ zIndex: 9999 }}>
+          <div className="bg-[#0f172a]/95 backdrop-blur-xl shadow-[0_-4px_30px_rgba(0,0,0,0.4)] border-t border-white/[0.06]">
+            <nav className="flex justify-around items-center px-1 py-2 pb-safe max-w-lg mx-auto">
+              {[
+                { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+                { id: 'orders',    label: 'Orders',    icon: ShoppingCart },
+                { id: 'products',  label: 'Products',  icon: Package },
+                ...(isAdmin ? [{ id: 'users', label: 'Users', icon: Users }] : []),
+                { id: 'settings',  label: 'More',      icon: Settings },
+              ].map(tab => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className="relative flex-1 flex flex-col items-center py-1.5 group"
+                  >
+                    {isActive && (
+                      <motion.div
+                        layoutId="admin-nav-pill"
+                        className="absolute inset-0 mx-2 bg-red-600/15 rounded-xl"
+                        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                      />
+                    )}
+                    <div className="relative z-10 flex flex-col items-center gap-0.5">
+                      <motion.div animate={{ scale: isActive ? 1.15 : 1 }} transition={{ type: 'spring', stiffness: 400, damping: 20 }}>
+                        <tab.icon
+                          className={cn("w-5 h-5 transition-colors duration-200", isActive ? "text-red-400" : "text-gray-500 group-hover:text-gray-300")}
+                          strokeWidth={isActive ? 2.5 : 1.8}
+                        />
+                      </motion.div>
+                      <span className={cn(
+                        "text-[8px] font-black uppercase tracking-[0.1em] transition-colors duration-200",
+                        isActive ? "text-red-400" : "text-gray-500 group-hover:text-gray-300"
+                      )}>
+                        {tab.label}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
         </div>
       </div>
     </div>

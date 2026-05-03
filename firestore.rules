@@ -79,9 +79,13 @@ service cloud.firestore {
     // ─── Provisioned Staff Collection ────────────────────────────────────
     match /provisionedStaff/{phone} {
       // Login page must read this BEFORE auth to decide OTP vs password flow
-      // Only the specific phone document is readable (path-based security)
       allow read: if true;
+      // Admin can manage all staff records
       allow write: if isAdmin();
+      // Authenticated staff can update their OWN password fields (change-password flow)
+      // This is needed because isAdmin() fails for new UIDs that don't have a users doc yet
+      allow update: if isAuthenticated() 
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['passwordHash', 'mustChangePassword']);
     }
 
     // ─── Referrals Collection ────────────────────────────────────────────

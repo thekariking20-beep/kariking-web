@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone } from 'lucide-react';
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -15,23 +15,14 @@ import { cn } from '../lib/utils';
 import { PartyPopper } from 'lucide-react';
 import LocationPickerModal from '../components/location/LocationPickerModal';
 import { checkOrderLimit } from '../lib/rateLimit';
+import QRCode from 'qrcode';
 
 // ─── UPI QR Payment Config ───────────────────────────────────────────────
 const UPI_ID = '45105944505@sbi'; 
 const UPI_NAME = 'KARIKING';
 
-// Static QR code image — drop your bank QR image at: src/assets/upi-qr.png
-// Then uncomment the import below:
-// import upiQrImage from '../assets/upi-qr.png';
-const upiQrImage: string | null = null; // Set to imported image when ready
-
-// ─── Loading Stage Messages ─────────────────────────────────────────────
-const LOADING_STAGES = [
-  'Securing your order...',
-  'Verifying items & prices...',
-  'Confirming payment method...',
-  'Almost done...',
-];
+// ─── Mobile Detection ───────────────────────────────────────────────────
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 export default function Cart() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
@@ -39,7 +30,6 @@ export default function Cart() {
   const { selectedAddress } = useAddress();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [loadingStage, setLoadingStage] = useState(0);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
@@ -57,9 +47,13 @@ export default function Cart() {
   const [utrError, setUtrError] = useState('');
   const [loadingVerify, setLoadingVerify] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [orderCreating, setOrderCreating] = useState(false);
 
   // Ref to hold pending checkout data for network recovery
   const pendingCheckoutRef = useRef<any>(null);
+  // Ref to hold order creation promise so UTR submission can await it
+  const orderPromiseRef = useRef<Promise<string> | null>(null);
 
   const { width, height } = useWindowSize();
 
@@ -73,19 +67,33 @@ export default function Cart() {
   const finalTotal = Math.max(0, totalPrice - discountAmount) + deliveryFee;
   const canPayFullyWithCoins = discountAmount >= totalPrice + deliveryFee;
 
-  // formatQty imported from lib/units
+  // ─── Pre-computed UPI string (instant, no API call) ───────────────────
+  const upiString = useMemo(() => 
+    `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`,
+    [finalTotal]
+  );
+
+  // ─── Instant QR Generation (client-side, zero latency) ────────────────
+  useEffect(() => {
+    if (finalTotal > 0) {
+      QRCode.toDataURL(upiString, {
+        width: 280,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+        errorCorrectionLevel: 'M'
+      }).then(url => setQrDataUrl(url)).catch(() => {});
+    }
+  }, [upiString, finalTotal]);
 
   // ─── Network Status Listener ──────────────────────────────────────────
   useEffect(() => {
     const goOnline = () => {
       setIsOffline(false);
-      // Auto-retry pending checkout when connection restores
       if (pendingCheckoutRef.current) {
         handleCheckout();
       }
     };
     const goOffline = () => setIsOffline(true);
-
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
     return () => {
@@ -94,15 +102,6 @@ export default function Cart() {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ─── Loading Stage Animation ──────────────────────────────────────────
-  useEffect(() => {
-    if (!loading) { setLoadingStage(0); return; }
-    const interval = setInterval(() => {
-      setLoadingStage(prev => (prev + 1) % LOADING_STAGES.length);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [loading]);
 
   // ─── Direct UPI Payment Architecture ──────────────────────────────────
   // Razorpay has been removed. All payments are verified via UTR on direct UPI.
@@ -118,138 +117,100 @@ export default function Cart() {
 
   const validationError = getValidationError();
 
-  // ─── Core Checkout Handler (Failure-Proof) ────────────────────────────
+  // ─── Core Checkout Handler (INSTANT QR — order in background) ──────────
   const handleCheckout = async () => {
-    if (!user) {
-      navigate('/login');
-      return;
-    }
+    if (!user) { navigate('/login'); return; }
+    if (validationError) { setError(validationError); return; }
 
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
-
-    // Phase 2: Network-aware — check BEFORE attempting
     if (!navigator.onLine) {
       setIsOffline(true);
-      // Save intent so we can auto-retry when back online
       pendingCheckoutRef.current = true;
-      return; // The online listener will call handleCheckout automatically
+      return;
     }
 
     const rateCheck = checkOrderLimit();
-    if (!rateCheck.allowed) {
-      setError(rateCheck.error);
+    if (!rateCheck.allowed) { setError(rateCheck.error); return; }
+
+    let effectiveMethod = paymentMethod;
+    if (canPayFullyWithCoins && useCoins) effectiveMethod = 'coins';
+
+    setError('');
+
+    // ─── QR Flow: Show modal INSTANTLY, create order in background ─────
+    if (effectiveMethod === 'qr' && finalTotal > 0) {
+      setShowQrModal(true); // INSTANT — QR is already pre-generated
+      setOrderCreating(true);
+
+      // Generate idempotency key
+      let iKey = idempotencyKey;
+      if (!iKey) { iKey = crypto.randomUUID(); setIdempotencyKey(iKey); }
+
+      // Create order silently in background
+      const orderPromise = (async (): Promise<string> => {
+        const createOrderFn = httpsCallable(functions, 'createOrder');
+        const MAX_RETRIES = 5;
+        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+          try {
+            const response = await createOrderFn({
+              items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+              address, phone, useCoins, coinsToUse: coinsBeingUsed,
+              paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey
+            });
+            const data = response.data as { success: boolean; orderId: string };
+            if (data?.success) {
+              setQrOrderId(data.orderId);
+              setOrderCreating(false);
+              return data.orderId;
+            }
+            throw new Error('order-failed');
+          } catch (err: any) {
+            const code = err?.code || '';
+            if (['invalid-argument', 'failed-precondition'].includes(code)) throw err;
+            if (attempt === MAX_RETRIES) throw err;
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+          }
+        }
+        throw new Error('exhausted');
+      })();
+      orderPromiseRef.current = orderPromise;
+      // Don't await — let user scan QR while order creates
+      orderPromise.catch(() => setOrderCreating(false));
       return;
     }
 
-    // Determine effective payment method
-    let effectiveMethod = paymentMethod;
-    if (canPayFullyWithCoins && useCoins) {
-      effectiveMethod = 'coins';
-    }
-
+    // ─── Coins-only flow (no QR needed) ─────────────────────────────────
     setLoading(true);
-    setError('');
-
-    // Phase 5: Idempotent key — reuse across retries, never duplicate
     let iKey = idempotencyKey;
-    if (!iKey) {
-      iKey = crypto.randomUUID();
-      setIdempotencyKey(iKey);
-    }
+    if (!iKey) { iKey = crypto.randomUUID(); setIdempotencyKey(iKey); }
 
     try {
       const createOrderFn = httpsCallable(functions, 'createOrder');
-      
-      // Phase 4: Silent auto-retry with exponential backoff (up to 5 attempts)
-      let response;
-      const MAX_RETRIES = 5;
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          response = await createOrderFn({
-            items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
-            address,
-            phone,
-            useCoins,
-            coinsToUse: coinsBeingUsed,
-            paymentMethod: effectiveMethod,
-            deliveryFee,
-            idempotencyKey: iKey
-          });
-          break; // Success — exit retry loop
-        } catch (err: any) {
-          // If it's a validation error from our backend, don't retry
-          const code = err?.code || '';
-          if (['invalid-argument', 'failed-precondition', 'permission-denied', 'unauthenticated'].includes(code)) {
-            throw err; // Business logic error — show to user
-          }
-          // Network/timeout error — silently retry
-          if (attempt === MAX_RETRIES) {
-            // All retries exhausted — save for network recovery
-            pendingCheckoutRef.current = true;
-            throw err;
-          }
-          // Exponential backoff: 1s, 2s, 4s, 8s
-          await new Promise(res => setTimeout(res, Math.min(1000 * Math.pow(2, attempt - 1), 8000)));
-        }
-      }
-
-      const data = response?.data as { success: boolean; orderId: string; finalAmount: number } | undefined;
-      
-      if (!data || !data.success) {
-        throw new Error('order-creation-failed');
-      }
-
-      // Phase 9: Success guarantee — always navigate to next step
-      pendingCheckoutRef.current = null; // Clear pending
-
-      // Direct UPI / QR Flow
-      if (effectiveMethod === 'qr' && data.finalAmount > 0) {
-        setQrOrderId(data.orderId);
-        setShowQrModal(true);
-        setLoading(false);
-        return;
-      }
-
-      // Success — coins-only completed (if amount was 0)
-      if (effectiveMethod === 'coins' || data.finalAmount === 0) {
+      const response = await createOrderFn({
+        items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+        address, phone, useCoins, coinsToUse: coinsBeingUsed,
+        paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey
+      });
+      const data = response.data as { success: boolean; orderId: string; finalAmount: number };
+      if (data?.success) {
+        pendingCheckoutRef.current = null;
         await refreshUser();
         clearCart();
         setIdempotencyKey('');
         setOrderPlaced(true);
-        setTimeout(() => {
-          navigate('/orders');
-        }, 3000);
+        setTimeout(() => navigate('/orders'), 3000);
       }
     } catch (err: any) {
-      console.error('Checkout error:', err);
-      // Phase 8: No generic errors — map to specific messages
       const code = err?.code || '';
-      const msg = err?.message || '';
-      if (code === 'invalid-argument') {
-        setError(msg || 'Some order details are invalid. Please check your cart.');
-      } else if (code === 'failed-precondition') {
-        setError(msg || 'A product in your cart is no longer available.');
-      } else if (code === 'unauthenticated') {
-        navigate('/login');
-      } else if (!navigator.onLine) {
-        setIsOffline(true);
-        pendingCheckoutRef.current = true;
-        // Will auto-retry when connection restores
-      } else {
-        // Exhausted all retries but still online — very rare
-        setError('Taking longer than expected. Please try once more.');
-      }
+      if (code === 'unauthenticated') navigate('/login');
+      else if (!navigator.onLine) { setIsOffline(true); pendingCheckoutRef.current = true; }
+      else setError(err?.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ─── UTR Submit Handler (Server-Validated) ─────────────────────────────
+  // ─── UTR Submit Handler (waits for background order if needed) ──────────
   const handleQrConfirm = async () => {
-    // Strict 12-digit numeric validation
     const trimmedUtr = utrInput.trim();
     if (!/^\d{12}$/.test(trimmedUtr)) {
       setUtrError('UTR must be exactly 12 digits (numbers only)');
@@ -260,20 +221,27 @@ export default function Cart() {
     setUtrError('');
     
     try {
-      // Call server-side function for validation + global uniqueness check
+      // Wait for background order creation if still in progress
+      let orderId = qrOrderId;
+      if (!orderId && orderPromiseRef.current) {
+        orderId = await orderPromiseRef.current;
+      }
+      if (!orderId) {
+        setUtrError('Order is being created. Please wait a moment and try again.');
+        setLoadingVerify(false);
+        return;
+      }
+
       const submitUtrFn = httpsCallable(functions, 'submitUtr');
-      await submitUtrFn({ orderId: qrOrderId, utrNumber: trimmedUtr });
+      await submitUtrFn({ orderId, utrNumber: trimmedUtr });
       
       setShowQrModal(false);
       await refreshUser();
       clearCart();
+      setIdempotencyKey('');
       setOrderPlaced(true);
-      setTimeout(() => {
-        navigate('/orders');
-      }, 3000);
+      setTimeout(() => navigate('/orders'), 3000);
     } catch (err: any) {
-      console.error(err);
-      // Extract Firebase error message
       const msg = err?.message || '';
       if (msg.includes('already been used')) {
         setUtrError('This UTR has already been used for another order.');
@@ -549,7 +517,7 @@ export default function Cart() {
                     "w-10 h-10 rounded-xl flex items-center justify-center",
                     paymentMethod === 'qr' ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-400"
                   )}>
-                    <QrCode className="w-5 h-5" />
+                    <QrCodeIcon className="w-5 h-5" />
                   </div>
                   <div className="flex-1">
                     <p className="font-bold text-gray-900 text-sm">UPI QR Payment</p>
@@ -607,7 +575,7 @@ export default function Cart() {
             {loading ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="w-5 h-5 animate-spin" />
-                {LOADING_STAGES[loadingStage]}
+                Processing...
               </span>
             ) : isOffline ? (
               <span className="flex items-center gap-2">
@@ -626,7 +594,7 @@ export default function Cart() {
         </div>
       </div>
 
-      {/* ─── QR Payment Modal ──────────────────────────────────── */}
+      {/* ─── QR Payment Modal (INSTANT — no backend wait) ──────────────── */}
       <AnimatePresence>
         {showQrModal && (
           <motion.div
@@ -639,30 +607,21 @@ export default function Cart() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-3xl max-w-[380px] w-full p-6 shadow-2xl relative"
+              className="bg-white rounded-3xl max-w-[400px] w-full p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto"
             >
               <button
                 onClick={() => setShowQrModal(false)}
-                className="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors"
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-gray-100 transition-colors z-10"
               >
                 <X className="w-5 h-5 text-gray-400" />
               </button>
 
-              <div className="text-center mb-6">
+              <div className="text-center mb-5">
                 <div className="w-14 h-14 mx-auto rounded-2xl bg-blue-100 flex items-center justify-center mb-3">
-                  <QrCode className="w-7 h-7 text-blue-600" />
+                  <QrCodeIcon className="w-7 h-7 text-blue-600" />
                 </div>
                 <h3 className="text-xl font-black text-gray-900">Scan & Pay</h3>
                 <p className="text-sm text-gray-500 mt-1">Pay ₹{finalTotal} via any UPI app</p>
-              </div>
-
-              {/* QR Code — static image or API-generated fallback */}
-              <div className="bg-white rounded-2xl p-5 mb-4 flex items-center justify-center border-2 border-gray-100 shadow-inner">
-                <img
-                  src={upiQrImage || `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(`upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order_${qrOrderId.slice(-6)}`)}`}
-                  alt="UPI QR Code"
-                  className="w-[240px] h-[240px] rounded-xl object-contain"
-                />
               </div>
 
               {/* Amount highlight */}
@@ -671,37 +630,68 @@ export default function Cart() {
                 <p className="text-3xl font-black text-green-700 my-1">₹{finalTotal}</p>
               </div>
 
-              {/* Mobile Deep Links */}
-              <div className="mb-5 sm:hidden grid grid-cols-3 gap-2">
-                <a
-                  href={`gpay://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
-                >
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-4 object-contain" />
-                  <span className="text-[9px] font-bold text-gray-600 mt-1">GPay</span>
-                </a>
-                <a
-                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
-                >
-                  <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-4 object-contain" />
-                  <span className="text-[9px] font-bold text-gray-600 mt-1">PhonePe</span>
-                </a>
-                <a
-                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
-                  className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors"
-                >
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-3.5 object-contain" />
-                  <span className="text-[9px] font-bold text-gray-600 mt-1">Paytm</span>
-                </a>
-              </div>
-              <div className="hidden sm:block text-center mb-4">
-                <p className="text-xs text-gray-400 font-medium">Scan code with any UPI app</p>
-                <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
-              </div>
+              {/* QR Code — INSTANT client-side generation */}
+              {!isMobile && (
+                <div className="bg-white rounded-2xl p-4 mb-4 flex flex-col items-center justify-center border-2 border-gray-100 shadow-inner">
+                  {qrDataUrl ? (
+                    <img src={qrDataUrl} alt="UPI QR Code" className="w-[240px] h-[240px] rounded-xl" />
+                  ) : (
+                    <div className="w-[240px] h-[240px] flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 animate-spin text-gray-300" />
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-400 font-medium mt-3">Scan with any UPI app</p>
+                  <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
+                </div>
+              )}
+
+              {/* Mobile UPI Deep Links */}
+              {isMobile && (
+                <div className="mb-4 space-y-2">
+                  <a
+                    href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                    className="w-full bg-white border-2 border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
+                  >
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/f/f2/Google_Pay_Logo.svg" alt="GPay" className="h-6 w-6 object-contain" />
+                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with Google Pay</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400" />
+                  </a>
+                  <a
+                    href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                    className="w-full bg-white border-2 border-gray-100 hover:border-purple-200 hover:bg-purple-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
+                  >
+                    <img src="https://upload.wikimedia.org/wikipedia/en/thumb/6/60/PhonePe_Logo.svg/1200px-PhonePe_Logo.svg.png" alt="PhonePe" className="h-6 w-6 object-contain" />
+                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with PhonePe</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400" />
+                  </a>
+                  <a
+                    href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR`}
+                    className="w-full bg-white border-2 border-gray-100 hover:border-blue-200 hover:bg-blue-50/30 rounded-xl p-3.5 flex items-center gap-3 shadow-sm transition-all"
+                  >
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/c/cd/Paytm_logo.png" alt="Paytm" className="h-5 w-6 object-contain" />
+                    <span className="font-bold text-gray-900 text-sm flex-1">Pay with Paytm</span>
+                    <ArrowRight className="w-4 h-4 text-gray-400" />
+                  </a>
+                  {/* Universal UPI fallback */}
+                  <a
+                    href={upiString}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center justify-center gap-2 text-xs font-bold text-gray-500 hover:bg-gray-100 transition-colors"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    Open other UPI app
+                  </a>
+                  {/* Fallback QR for mobile too */}
+                  <details className="mt-2">
+                    <summary className="text-[10px] text-center text-gray-400 font-medium cursor-pointer hover:text-gray-600">Can't open app? Show QR code</summary>
+                    <div className="mt-2 flex justify-center">
+                      {qrDataUrl && <img src={qrDataUrl} alt="UPI QR" className="w-[200px] h-[200px] rounded-xl border border-gray-100" />}
+                    </div>
+                  </details>
+                </div>
+              )}
 
               {/* UTR Input Field */}
-              <div className="mb-5 bg-gray-50 p-4 rounded-xl border border-gray-200">
+              <div className="mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <label className="block text-xs font-bold text-gray-700 uppercase tracking-widest mb-2">
                   Enter 12-Digit UTR Number
                 </label>
@@ -719,12 +709,25 @@ export default function Cart() {
                 {utrError && <p className="text-[10px] text-red-600 font-bold mt-2 text-center">{utrError}</p>}
               </div>
 
+              {/* Order creation status — subtle indicator */}
+              {orderCreating && (
+                <div className="flex items-center justify-center gap-2 mb-3 text-[10px] text-gray-400 font-medium">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Securing your order...
+                </div>
+              )}
+
               <button
                 onClick={handleQrConfirm}
                 disabled={loadingVerify || utrInput.length !== 12}
                 className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:shadow-none active:scale-95"
               >
-                {loadingVerify ? 'Submitting...' : (
+                {loadingVerify ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Verifying...
+                  </span>
+                ) : (
                   <>
                     <CheckCircle2 className="w-5 h-5" />
                     Submit UTR & Confirm

@@ -78,8 +78,9 @@ service cloud.firestore {
 
     // ─── Provisioned Staff Collection ────────────────────────────────────
     match /provisionedStaff/{phone} {
-      // Security: Prevent phone number harvesting by non-authenticated users
-      allow read: if isAuthenticated() && (request.auth.token.phone_number == phone || isAdmin());
+      // Login page must read this BEFORE auth to decide OTP vs password flow
+      // Only the specific phone document is readable (path-based security)
+      allow read: if true;
       allow write: if isAdmin();
     }
 

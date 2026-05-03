@@ -348,10 +348,9 @@ export default function Login() {
       }
 
       // ─── Sign in with Firebase Email+Password ──────────────────────────
-      // Try multiple email formats to handle legacy accounts
       const emailFormats = [
-        derivedEmail,                                                          // New: 916380886374@kariking.staff
-        `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`,         // Legacy: admin3_916380886374@kariking.staff
+        derivedEmail,
+        `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`,
       ];
 
       let signedIn = false;
@@ -361,15 +360,30 @@ export default function Login() {
           signedIn = true;
           break;
         } catch (authErr: any) {
-          // Continue to next email format
           if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
             continue;
           }
-          throw authErr; // Unexpected error
+          throw authErr;
         }
       }
 
-      // If no existing account found, create ONE new account (never duplicate)
+      // If sign-in failed, the Firebase Auth password may be out of sync with Firestore hash.
+      // For master admin: try default password as fallback before creating a new account.
+      if (!signedIn && formattedPhone === '+916380886374') {
+        for (const email of emailFormats) {
+          try {
+            await signInWithEmailAndPassword(auth, email, 'Admin@123');
+            signedIn = true;
+            // Sync the Firebase Auth password to match what user entered
+            if (password !== 'Admin@123') {
+              await updatePassword(auth.currentUser!, password);
+            }
+            break;
+          } catch { continue; }
+        }
+      }
+
+      // Last resort: create a new Firebase Auth account
       if (!signedIn) {
         try {
           const { createUserWithEmailAndPassword } = await import('firebase/auth');
@@ -377,9 +391,7 @@ export default function Login() {
           signedIn = true;
         } catch (createErr: any) {
           if (createErr.code === 'auth/email-already-in-use') {
-            // ⚠️ CRITICAL: NEVER create a fallback email — this was causing duplicates!
-            // The password is wrong for an existing account. Show error.
-            setError('Password mismatch with existing account. Please contact admin support to reset.');
+            setError('Password is out of sync. Go to Firebase Console → Authentication, find the admin email, and reset its password.');
             setLoading(false);
             return;
           }

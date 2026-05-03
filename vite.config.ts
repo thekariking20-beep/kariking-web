@@ -26,8 +26,12 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks: {
             'vendor-react':    ['react', 'react-dom', 'react-router-dom'],
-            'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/storage'],
-            'vendor-ui':       ['motion', 'lucide-react', 'recharts'],
+            'vendor-firebase-core': ['firebase/app', 'firebase/auth'],
+            'vendor-firebase-db': ['firebase/firestore', 'firebase/storage'],
+            'vendor-ui-motion': ['motion'],
+            'vendor-ui-icons': ['lucide-react'],
+            'vendor-ui-charts': ['recharts'],
+            'vendor-utils': ['jspdf', 'html2canvas', 'qrcode']
           },
         },
       },

@@ -31,7 +31,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow read: if isDashboardUser();
-      allow write: if isOwner(userId);
+
+      // Users can update their own profile, but CANNOT touch financial fields
+      allow update: if isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coins', 'lockedCoins', 'role', 'usedCoupons']);
+
+      // Allow creates for new user registration (auth context creates user doc)
+      allow create: if isOwner(userId);
+
+      // Admin can write anything
       allow write: if isAdmin();
     }
 
@@ -56,6 +64,15 @@ service cloud.firestore {
     // ─── Categories Collection ───────────────────────────────────────────
     match /categories/{categoryId} {
       allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Coupons Collection ──────────────────────────────────────────────
+    match /coupons/{couponId} {
+      // Anyone authenticated can read coupons (for validation UI)
+      allow read: if isAuthenticated();
+      // Only admin can create/update/delete coupons
+      // Usage count increments happen via Cloud Function transaction
       allow write: if isAdmin();
     }
 
@@ -90,10 +107,27 @@ service cloud.firestore {
     }
 
     // ─── Coin Transactions ───────────────────────────────────────────────
+    // SECURITY: Only readable by the owning user. Creates happen ONLY via Cloud Functions.
     match /coinTransactions/{txId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow read: if isAdmin();
+      // No client-side create/update/delete — all coin mutations via Cloud Functions
+      allow write: if false;
+    }
+
+    // ─── Payment Audit Logs ──────────────────────────────────────────────
+    // SECURITY: Read-only for admins. Writes happen ONLY via Cloud Functions.
+    match /paymentLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ─── Bulk Bookings ───────────────────────────────────────────────────
+    match /bulkBookings/{bookingId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isDashboardUser();
       allow create: if isAuthenticated();
+      allow update: if isDashboardUser();
     }
   }
 }

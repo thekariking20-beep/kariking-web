@@ -44,8 +44,13 @@ export default function DeliveryDashboard() {
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
   // ─── Derived lists ────────────────────────────────────────────────────────
-  const activeOrders    = allOrders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
-  const completedOrders = allOrders.filter(o => o.status === 'Delivered' || o.status === 'Cancelled');
+  // Unassigned orders — only visible when online
+  const pendingNewOrders = isOnline ? allOrders.filter(o => !o.deliveryPartnerId && o.status === 'Order Placed') : [];
+  // My active orders (assigned to me, not yet done)
+  const myActiveOrders   = allOrders.filter(o => o.deliveryPartnerId === user?.uid && o.status !== 'Delivered' && o.status !== 'Cancelled');
+  // All active = pending new + my active
+  const activeOrders     = [...pendingNewOrders, ...myActiveOrders];
+  const completedOrders  = allOrders.filter(o => o.deliveryPartnerId === user?.uid && (o.status === 'Delivered' || o.status === 'Cancelled'));
 
   // ─── Fetch partner's online state ──────────────────────────────────────────
   useEffect(() => {
@@ -58,19 +63,52 @@ export default function DeliveryDashboard() {
     });
   }, [user]);
 
-  // ─── Real-time orders listener ─────────────────────────────────────────────
+  // ─── Real-time orders listener (assigned to me) ──────────────────────────
   useEffect(() => {
     if (!user || !isDelivery) return;
-    const q = query(
+
+    // 1. Orders assigned to this partner
+    const myQ = query(
       collection(db, 'orders'),
       where('deliveryPartnerId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
-    const unsub = onSnapshot(q, snap => {
-      setAllOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-      setLoading(false);
+
+    let myOrders: Order[] = [];
+    let pendingOrders: Order[] = [];
+
+    const unsub1 = onSnapshot(myQ, snap => {
+      myOrders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+      mergeOrders();
     }, err => { console.error(err); setLoading(false); });
-    return () => unsub();
+
+    // 2. Unassigned pending orders (visible only when online)
+    const pendingQ = query(
+      collection(db, 'orders'),
+      where('status', '==', 'Order Placed'),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsub2 = onSnapshot(pendingQ, snap => {
+      // Filter client-side: only orders with no deliveryPartnerId
+      pendingOrders = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Order))
+        .filter(o => !o.deliveryPartnerId);
+      mergeOrders();
+    }, err => { console.error(err); setLoading(false); });
+
+    function mergeOrders() {
+      // Combine, deduplicate by id, sort by createdAt desc
+      const map = new Map<string, Order>();
+      [...myOrders, ...pendingOrders].forEach(o => map.set(o.id, o));
+      const merged = Array.from(map.values()).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setAllOrders(merged);
+      setLoading(false);
+    }
+
+    return () => { unsub1(); unsub2(); };
   }, [user, isDelivery]);
 
   // ─── Toggle online/offline ────────────────────────────────────────────────
@@ -78,7 +116,7 @@ export default function DeliveryDashboard() {
     if (!user || togglingOnline) return;
     
     // Prevent going offline if there are active holding orders
-    if (isOnline && activeOrders.length > 0) {
+    if (isOnline && myActiveOrders.length > 0) {
       setErrorToast("Cannot go offline while holding active orders!");
       setTimeout(() => setErrorToast(null), 3000);
       return;
@@ -95,6 +133,28 @@ export default function DeliveryDashboard() {
       setTimeout(() => setErrorToast(null), 3000);
     } finally {
       setTogglingOnline(false);
+    }
+  };
+
+  // ─── Accept (self-assign) an unassigned order ─────────────────────────────
+  const acceptOrder = async (order: Order) => {
+    if (!user || updatingOrderId === order.id) return;
+    setUpdatingOrderId(order.id);
+    try {
+      const now = new Date().toISOString();
+      await updateDoc(doc(db, 'orders', order.id), {
+        deliveryPartnerId: user.uid,
+        assignedAt: now,
+        status: 'Order Received',
+        statusHistory: [...order.statusHistory, { status: 'Order Received', time: now }],
+        updatedAt: now,
+      });
+    } catch (e) {
+      console.error(e);
+      setErrorToast("Failed to accept order. Try again.");
+      setTimeout(() => setErrorToast(null), 3000);
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -337,6 +397,9 @@ export default function DeliveryDashboard() {
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-black text-2xl text-gray-900 leading-none">₹{order.totalAmount}</h3>
+                        {!order.deliveryPartnerId && (
+                          <span className="bg-green-100 text-green-700 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-green-200 animate-pulse">NEW</span>
+                        )}
                         {order.type === 'bulk' && <span className="bg-blue-100 text-blue-700 p-1 rounded-lg"><Package className="w-4 h-4"/></span>}
                         {order.type === 'function' && <span className="bg-amber-100 text-amber-600 p-1 rounded-lg"><PartyPopper className="w-4 h-4"/></span>}
                       </div>
@@ -360,21 +423,50 @@ export default function DeliveryDashboard() {
 
                   <hr className="border-gray-50 mb-4" />
 
-                  {/* Customer Info (Address/Phone) */}
-                  <div className="space-y-4">
-                    <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center shrink-0 border border-red-100">
-                        <MapPin className="w-5 h-5 text-red-500" />
+                  {/* 🛒 Items List */}
+                  {order.items && order.items.length > 0 && (
+                    <div className="mb-4 bg-gray-50 rounded-xl p-3 space-y-1.5">
+                      <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3" /> Order Items
+                      </p>
+                      {order.items.slice(0, 5).map((item, idx) => (
+                        <div key={idx} className="flex justify-between text-xs">
+                          <span className="text-gray-700 font-medium truncate flex-1 mr-2">{item.name}</span>
+                          <span className="text-gray-500 font-bold shrink-0">
+                            x{item.quantity} {item.unitType ? `(${item.baseWeight || ''}${item.unitType})` : ''}
+                          </span>
+                        </div>
+                      ))}
+                      {order.items.length > 5 && (
+                        <p className="text-[10px] text-gray-400 font-medium mt-1">+{order.items.length - 5} more items</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 📍 Customer Info (Address + Phone) */}
+                  <div className="space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-9 h-9 rounded-full bg-red-50 flex items-center justify-center shrink-0 border border-red-100">
+                        <MapPin className="w-4 h-4 text-red-500" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Deliver To</p>
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Deliver To</p>
                         <p className="text-sm font-bold text-gray-800 leading-snug">{order.address}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center shrink-0 border border-blue-100">
+                        <Phone className="w-4 h-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">Customer</p>
+                        <p className="text-sm font-bold text-gray-800">{order.phone}</p>
                       </div>
                     </div>
                   </div>
 
-                  {/* Top action buttons (Call / Map) */}
-                  <div className="grid grid-cols-2 gap-3 mt-5">
+                  {/* Quick action buttons (Call / Map) */}
+                  <div className="grid grid-cols-2 gap-3 mt-4">
                     <a
                       href={`tel:${order.phone}`}
                       className="bg-blue-50 text-blue-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors active:scale-95 border border-blue-100/50"
@@ -393,19 +485,30 @@ export default function DeliveryDashboard() {
 
                   {/* ── PRIMARY DELIVERY ACTION BUTTONS ── */}
                   {tab === 'active' && (
-                    <div className="mt-3 pt-3 border-t border-gray-50">
-                      {/* Accept → Packed */}
-                      {(order.status === 'Order Received' || order.status === 'Order Placed') && (
+                    <div className="mt-4 pt-4 border-t border-gray-100">
+                      {/* 🟢 Accept — for unassigned orders (self-assign) */}
+                      {order.status === 'Order Placed' && !order.deliveryPartnerId && (
+                        <button
+                          onClick={() => acceptOrder(order)}
+                          disabled={updatingOrderId === order.id}
+                          className="w-full bg-green-500 hover:bg-green-600 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-green-500/30 disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-5 h-5" /> {updatingOrderId === order.id ? 'Accepting...' : 'ACCEPT ORDER'}
+                        </button>
+                      )}
+
+                      {/* Accept (already assigned) → Packed */}
+                      {(order.status === 'Order Received') && (
                         <button
                           onClick={() => updateStatus(order, 'Packed')}
                           disabled={updatingOrderId === order.id}
                           className="w-full bg-gray-900 hover:bg-gray-800 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md disabled:opacity-50"
                         >
-                          <CheckCircle2 className="w-5 h-5" /> {updatingOrderId === order.id ? 'Updating...' : 'ACCEPT ORDER'}
+                          <Package className="w-5 h-5" /> {updatingOrderId === order.id ? 'Updating...' : 'MARK PACKED'}
                         </button>
                       )}
 
-                      {/* Packed → Mark Picked Up (Dispatched) */}
+                      {/* 🟠 Packed → Mark Picked Up (Dispatched) */}
                       {order.status === 'Packed' && (
                         <button
                           onClick={() => updateStatus(order, 'Dispatched')}
@@ -416,11 +519,11 @@ export default function DeliveryDashboard() {
                         </button>
                       )}
 
-                      {/* Dispatched → Delivered */}
+                      {/* 🔵 Dispatched → Delivered */}
                       {order.status === 'Dispatched' && (
                         <button
                           onClick={() => updateStatus(order, 'Delivered')}
-                          className="w-full bg-green-500 hover:bg-green-600 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-green-500/20"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-blue-600/20"
                         >
                           <CheckCircle2 className="w-6 h-6" /> COMPLETE DELIVERY
                         </button>
@@ -435,8 +538,8 @@ export default function DeliveryDashboard() {
         )}
       </div>
 
-      {/* ─── FLOATING BOTTOM NAV ────────────────────────────────────────── */}
-      <div className="fixed bottom-6 left-6 right-6 max-w-md md:left-1/2 md:-translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/20 shadow-2xl rounded-3xl px-2 py-2 flex items-center justify-between z-20">
+      {/* ─── FIXED BOTTOM NAV ────────────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/95 backdrop-blur-xl border-t border-gray-200 shadow-2xl px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-between z-[999]">
         <button className="flex-1 flex flex-col items-center justify-center py-2 bg-red-50 rounded-2xl text-red-600 transition-colors">
           <Truck className="w-6 h-6 mb-1" />
           <span className="text-[9px] font-black uppercase tracking-widest">Orders</span>

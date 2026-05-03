@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone, Tag } from 'lucide-react';
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useAddress } from '../context/AddressContext';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../firebase';
+import { functions, db } from '../firebase';
+import { doc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatQty } from '../lib/units';
 import Confetti from 'react-confetti';
@@ -16,6 +17,7 @@ import { PartyPopper } from 'lucide-react';
 import LocationPickerModal from '../components/location/LocationPickerModal';
 import { checkOrderLimit } from '../lib/rateLimit';
 import QRCode from 'qrcode';
+import { validateCoupon } from '../lib/couponValidator';
 
 // ─── UPI QR Payment Config ───────────────────────────────────────────────
 const UPI_ID = '45105944505@sbi'; 
@@ -50,22 +52,35 @@ export default function Cart() {
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [orderCreating, setOrderCreating] = useState(false);
 
+  // ─── Coupon State ─────────────────────────────────────────────────────
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number, id?: string } | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState('');
+
   // Ref to hold pending checkout data for network recovery
   const pendingCheckoutRef = useRef<any>(null);
   // Ref to hold order creation promise so UTR submission can await it
   const orderPromiseRef = useRef<Promise<string> | null>(null);
+  // Double-click prevention guard
+  const checkoutInProgressRef = useRef(false);
 
   const { width, height } = useWindowSize();
 
   const COIN_VALUE = 20;
   const availableCoins = user?.coins || 0;
-  const maxCoinsToUse = Math.min(availableCoins, Math.floor(totalPrice / COIN_VALUE));
+  // Cap: coins can cover at most 20% of subtotal (after coupon)
+  const subtotalAfterCoupon = Math.max(0, totalPrice - (appliedCoupon?.discount || 0));
+  const maxCoinsByPercentCap = Math.floor((subtotalAfterCoupon * 0.2) / COIN_VALUE);
+  const maxCoinsToUse = Math.min(availableCoins, maxCoinsByPercentCap);
   const coinsBeingUsed = useCoins ? maxCoinsToUse : 0;
-  const discountAmount = coinsBeingUsed * COIN_VALUE;
+  const coinDiscount = coinsBeingUsed * COIN_VALUE;
+  const couponDiscount = appliedCoupon?.discount || 0;
+  const discountAmount = coinDiscount + couponDiscount;
   
   const deliveryFee = totalPrice >= 500 || totalPrice === 0 ? 0 : 40;
   const finalTotal = Math.max(0, totalPrice - discountAmount) + deliveryFee;
-  const canPayFullyWithCoins = discountAmount >= totalPrice + deliveryFee;
+  const canPayFullyWithCoins = coinDiscount >= totalPrice - couponDiscount + deliveryFee;
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
   const upiString = useMemo(() => 
@@ -103,6 +118,36 @@ export default function Cart() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── Coupon Handlers ──────────────────────────────────────────────────
+  const handleApplyCoupon = async () => {
+    if (!user || !couponInput.trim()) return;
+    setCouponLoading(true);
+    setCouponError('');
+    try {
+      const result = await validateCoupon(couponInput.trim(), totalPrice, user);
+      if (result.valid) {
+        setAppliedCoupon({ code: couponInput.trim().toUpperCase(), discount: result.discount, id: result.coupon?.id || '' });
+        setCouponInput('');
+        setCouponError('');
+      } else {
+        setCouponError(result.error);
+      }
+    } catch (e: any) {
+      if (e?.code === 'unavailable') {
+        setCouponError('Network error. Please check your connection and try again.');
+      } else {
+        setCouponError('Unable to verify coupon at this time. Please try again later.');
+      }
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponError('');
+  };
+
   // ─── Direct UPI Payment Architecture ──────────────────────────────────
   // Razorpay has been removed. All payments are verified via UTR on direct UPI.
 
@@ -121,6 +166,8 @@ export default function Cart() {
   const handleCheckout = async () => {
     if (!user) { navigate('/login'); return; }
     if (validationError) { setError(validationError); return; }
+    if (checkoutInProgressRef.current) return; // Prevent double-click
+    checkoutInProgressRef.current = true;
 
     if (!navigator.onLine) {
       setIsOffline(true);
@@ -154,7 +201,8 @@ export default function Cart() {
             const response = await createOrderFn({
               items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
               address, phone, useCoins, coinsToUse: coinsBeingUsed,
-              paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey
+              paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
+              couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
             });
             const data = response.data as { success: boolean; orderId: string };
             if (data?.success) {
@@ -188,14 +236,17 @@ export default function Cart() {
       const response = await createOrderFn({
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
         address, phone, useCoins, coinsToUse: coinsBeingUsed,
-        paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey
+        paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
+        couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
       });
       const data = response.data as { success: boolean; orderId: string; finalAmount: number };
       if (data?.success) {
+        // Coupon tracking is now handled atomically by the backend Cloud Function
         pendingCheckoutRef.current = null;
         await refreshUser();
         clearCart();
         setIdempotencyKey('');
+        setAppliedCoupon(null);
         setOrderPlaced(true);
         setTimeout(() => navigate('/orders'), 3000);
       }
@@ -203,9 +254,12 @@ export default function Cart() {
       const code = err?.code || '';
       if (code === 'unauthenticated') navigate('/login');
       else if (!navigator.onLine) { setIsOffline(true); pendingCheckoutRef.current = true; }
-      else setError(err?.message || 'Please try again.');
+      else if (code === 'failed-precondition') setError('Payment system is temporarily busy. Please wait a moment and try again.');
+      else if (code === 'unavailable') setError('Network issue detected. Please check your internet connection.');
+      else setError('We encountered an issue placing your order. Please refresh the page and try again, or contact support if the issue persists.');
     } finally {
       setLoading(false);
+      checkoutInProgressRef.current = false;
     }
   };
 
@@ -235,10 +289,13 @@ export default function Cart() {
       const submitUtrFn = httpsCallable(functions, 'submitUtr');
       await submitUtrFn({ orderId, utrNumber: trimmedUtr });
       
+      // Coupon tracking is handled atomically by the backend Cloud Function
+
       setShowQrModal(false);
       await refreshUser();
       clearCart();
       setIdempotencyKey('');
+      setAppliedCoupon(null);
       setOrderPlaced(true);
       setTimeout(() => navigate('/orders'), 3000);
     } catch (err: any) {
@@ -248,7 +305,7 @@ export default function Cart() {
       } else if (msg.includes('12 digits')) {
         setUtrError('UTR must be exactly 12 digits.');
       } else {
-        setUtrError('Verification failed. Please check UTR and try again.');
+        setUtrError('We could not verify this UTR. Please ensure you have entered the correct 12-digit reference number from your UPI app.');
       }
     } finally {
       setLoadingVerify(false);
@@ -364,6 +421,68 @@ export default function Cart() {
               <span className="font-medium">₹{Math.round(totalPrice)}</span>
             </div>
 
+            {/* ─── Coupon Section ────────────────────────────── */}
+            <div className="bg-gradient-to-r from-rose-50 to-pink-50 p-4 rounded-xl space-y-3 border border-rose-100/50">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center shadow-sm">
+                  <Tag className="w-3 h-3 text-white" />
+                </div>
+                <span className="text-sm font-bold text-gray-700">Apply Coupon</span>
+              </div>
+
+              {appliedCoupon ? (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center justify-between bg-green-50 border border-green-200 rounded-xl px-4 py-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    <span className="text-sm font-black text-green-700 uppercase tracking-wider">{appliedCoupon.code}</span>
+                    <span className="text-xs font-bold text-green-600">-₹{appliedCoupon.discount}</span>
+                  </div>
+                  <button onClick={handleRemoveCoupon} className="text-gray-400 hover:text-red-500 p-1">
+                    <X className="w-4 h-4" />
+                  </button>
+                </motion.div>
+              ) : (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={couponInput}
+                    onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(''); }}
+                    placeholder="Enter coupon code"
+                    className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg text-sm font-bold uppercase tracking-wider outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
+                    onKeyDown={e => e.key === 'Enter' && handleApplyCoupon()}
+                  />
+                  <button
+                    onClick={handleApplyCoupon}
+                    disabled={couponLoading || !couponInput.trim()}
+                    className="px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-bold hover:bg-gray-800 transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+                  >
+                    {couponLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
+                  </button>
+                </div>
+              )}
+
+              {couponError && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-[11px] text-red-600 font-bold flex items-center gap-1"
+                >
+                  <AlertCircle className="w-3 h-3" /> {couponError}
+                </motion.p>
+              )}
+
+              {appliedCoupon && (
+                <div className="flex justify-between text-sm font-bold border-t border-rose-200/50 pt-2">
+                  <span className="text-rose-700">Coupon Discount</span>
+                  <span className="text-green-600">-₹{appliedCoupon.discount}</span>
+                </div>
+              )}
+            </div>
+
             {/* ─── Kari Coins Section ──────────────────────────── */}
             {availableCoins > 0 && (
               <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-4 rounded-xl space-y-3 border border-amber-100/50">
@@ -389,10 +508,15 @@ export default function Cart() {
                 </div>
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] text-gray-500">
-                    Available: <span className="font-bold text-amber-700">{availableCoins} coins</span> (₹{availableCoins * COIN_VALUE} value)
+                    Available: <span className="font-bold text-amber-700">{availableCoins} coins</span> (₹{availableCoins * COIN_VALUE})
                   </p>
                   <p className="text-[10px] text-gray-400">1 coin = ₹{COIN_VALUE}</p>
                 </div>
+                {maxCoinsToUse < availableCoins && maxCoinsToUse > 0 && (
+                  <p className="text-[9px] text-amber-600 font-medium">
+                    Max usable: {maxCoinsToUse} coins (20% cap on this order)
+                  </p>
+                )}
                 {useCoins && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }} 
@@ -400,7 +524,7 @@ export default function Cart() {
                     className="flex justify-between text-sm font-bold border-t border-amber-200/50 pt-2"
                   >
                     <span className="text-amber-700">Coin Discount ({coinsBeingUsed} coins)</span>
-                    <span className="text-green-600">-₹{discountAmount}</span>
+                    <span className="text-green-600">-₹{coinDiscount}</span>
                   </motion.div>
                 )}
                 {useCoins && canPayFullyWithCoins && (

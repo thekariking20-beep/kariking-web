@@ -15,13 +15,14 @@ import AdminSettings from '../components/admin/AdminSettings';
 import AdminOrdersTab from '../components/admin/AdminOrdersTab';
 import AdminBookingsTab from '../components/admin/AdminBookingsTab';
 import CategoriesManager from '../components/admin/CategoriesManager';
+import CouponManager from '../components/admin/CouponManager';
 import { useCategories } from '../context/CategoriesContext';
 import { useNavigate } from 'react-router-dom';
 import { processReferralReward } from '../lib/referralReward';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons'>('dashboard');
   const { categories: dynamicCategories, getSubCategories: getDynamicSubCategories } = useCategories();
   
   const [products, setProducts] = useState<Product[]>([]);
@@ -35,8 +36,11 @@ export default function Admin() {
   const [orderLimit, setOrderLimit] = useState(50);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [listenersActive, setListenersActive] = useState(true);
   const navigate = useNavigate();
   const profileMenuRef = useRef<HTMLDivElement>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
   
   // Product state
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -62,8 +66,31 @@ export default function Admin() {
   const availableSubCategories = getDynamicSubCategories(formData.mainCategory);
   const isOthers = formData.mainCategory === 'Others';
 
+  // ─── Idle Detection: pause listeners after 15 min inactivity ──────────
+  useEffect(() => {
+    const resetIdleTimer = () => {
+      if (!listenersActive) setListenersActive(true);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = setTimeout(() => {
+        console.log('⏸️ Admin idle for 15 min — pausing real-time listeners');
+        setListenersActive(false);
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(e => window.addEventListener(e, resetIdleTimer));
+    resetIdleTimer(); // start timer immediately
+
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetIdleTimer));
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listenersActive]);
+
   // Live listener for real-time analytics — orders
   useEffect(() => {
+    if (!listenersActive) return; // Skip when idle
     setLoading(true);
     const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(orderLimit));
     const unsubscribe = onSnapshot(q, (snap) => {
@@ -71,10 +98,11 @@ export default function Admin() {
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [orderLimit]);
+  }, [orderLimit, listenersActive]);
 
   // ─── Real-time listeners for ALL admin data ─────────────────────────────────
   useEffect(() => {
+    if (!listenersActive) return; // Skip when idle
     const unsubs: (() => void)[] = [];
 
     // Products — always listen (needed for dashboard stats too)
@@ -116,7 +144,7 @@ export default function Admin() {
 
     setLoading(false);
     return () => unsubs.forEach(u => u());
-  }, [isAdmin]);
+  }, [isAdmin, listenersActive]);
 
   // --- Handlers for Products ---
   const handleProductSubmit = async (e: React.FormEvent) => {
@@ -278,6 +306,7 @@ export default function Admin() {
     { id: 'products', label: 'Products', icon: Package },
     { id: 'categories', label: 'Categories', icon: Layers },
     { id: 'homepage', label: 'Homepage', icon: Globe },
+    { id: 'coupons', label: 'Coupons', icon: Tag },
     ...(isAdmin ? [
       { id: 'users', label: 'Users & Roles', icon: Users },
       { id: 'provisioning', label: 'Provisioning', icon: Shield },
@@ -820,52 +849,99 @@ export default function Admin() {
               )}
 
               {/* USERS TAB */}
-              {activeTab === 'users' && isAdmin && (
-                <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-100">
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Phone / UID</th>
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Coins (Available / Locked)</th>
-                        <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Role</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {users.map(u => (
-                        <tr key={u.uid} className="hover:bg-gray-50">
-                          <td className="p-4">
-                            <p className="font-bold text-gray-900">{u.phone}</p>
-                            <p className="text-[10px] text-gray-400">UID: {u.uid}</p>
-                          </td>
-                          <td className="p-4 text-center">
-                            <span className="text-green-600 font-bold">{u.coins}</span>
-                            <span className="text-gray-300 mx-2">/</span>
-                            <span className="text-yellow-600 font-bold">{u.lockedCoins || 0}</span>
-                          </td>
-                          <td className="p-4 text-right">
-                             <select 
-                                className={cn(
-                                  "p-2 text-xs font-bold uppercase tracking-wider border rounded-lg",
-                                  u.role === 'admin' ? "bg-red-50 text-red-700 border-red-200" :
-                                  u.role === 'manager' ? "bg-blue-50 text-blue-700 border-blue-200" :
-                                  u.role === 'delivery' ? "bg-orange-50 text-orange-700 border-orange-200" :
-                                  "bg-gray-50 text-gray-700 border-gray-200"
-                                )}
-                                value={u.role}
-                                onChange={(e) => updateUserRole(u.uid, e.target.value)}
-                              >
-                                <option value="user">User</option>
-                                <option value="delivery">Delivery Partner</option>
-                                <option value="manager">Manager</option>
-                                <option value="admin">Admin</option>
-                              </select>
-                          </td>
+              {activeTab === 'users' && isAdmin && (() => {
+                // ─── DEDUPLICATE by phone number ─────────────────────────
+                const phoneMap = new Map<string, User[]>();
+                users.forEach(u => {
+                  const key = u.phone || u.uid; // fallback to uid if no phone
+                  if (!phoneMap.has(key)) phoneMap.set(key, []);
+                  phoneMap.get(key)!.push(u);
+                });
+                
+                // Keep the best doc per phone (most data, most recent)
+                const uniqueUsers: User[] = [];
+                let totalDuplicates = 0;
+                phoneMap.forEach((group) => {
+                  if (group.length > 1) totalDuplicates += group.length - 1;
+                  // Sort: prefer named users, then by createdAt descending
+                  group.sort((a, b) => {
+                    if (a.name && !b.name) return -1;
+                    if (!a.name && b.name) return 1;
+                    return (b.createdAt || '').localeCompare(a.createdAt || '');
+                  });
+                  uniqueUsers.push(group[0]);
+                });
+
+                // Sort final list by createdAt descending
+                uniqueUsers.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+                return (
+                <div className="space-y-4">
+                  {totalDuplicates > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-amber-800">⚠️ {totalDuplicates} duplicate user records detected</p>
+                        <p className="text-xs text-amber-600 mt-0.5">Showing unique users only. Run cleanup from Settings to permanently remove duplicates.</p>
+                      </div>
+                      <button 
+                        onClick={() => setActiveTab('settings')}
+                        className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors shrink-0"
+                      >
+                        Clean Up
+                      </button>
+                    </div>
+                  )}
+                  <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-100">
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Phone / UID</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Coins (Available / Locked)</th>
+                          <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Role</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {uniqueUsers.map(u => (
+                          <tr key={u.uid} className="hover:bg-gray-50">
+                            <td className="p-4">
+                              <p className="font-bold text-gray-900">{u.phone}</p>
+                              {u.name && <p className="text-xs text-gray-500 font-medium">{u.name}</p>}
+                              <p className="text-[10px] text-gray-400">UID: {u.uid}</p>
+                            </td>
+                            <td className="p-4 text-center">
+                              <span className="text-green-600 font-bold">{u.coins}</span>
+                              <span className="text-gray-300 mx-2">/</span>
+                              <span className="text-yellow-600 font-bold">{u.lockedCoins || 0}</span>
+                            </td>
+                            <td className="p-4 text-right">
+                               <select 
+                                  className={cn(
+                                    "p-2 text-xs font-bold uppercase tracking-wider border rounded-lg",
+                                    u.role === 'admin' ? "bg-red-50 text-red-700 border-red-200" :
+                                    u.role === 'manager' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                    u.role === 'delivery' ? "bg-orange-50 text-orange-700 border-orange-200" :
+                                    "bg-gray-50 text-gray-700 border-gray-200"
+                                  )}
+                                  value={u.role}
+                                  onChange={(e) => updateUserRole(u.uid, e.target.value)}
+                                >
+                                  <option value="user">User</option>
+                                  <option value="delivery">Delivery Partner</option>
+                                  <option value="manager">Manager</option>
+                                  <option value="admin">Admin</option>
+                                </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-400 font-medium">
+                      Showing {uniqueUsers.length} unique users {totalDuplicates > 0 ? `(${totalDuplicates} duplicates hidden)` : ''}
+                    </div>
+                  </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* REFERRALS TAB */}
               {activeTab === 'referrals' && isAdmin && (
@@ -990,6 +1066,11 @@ export default function Admin() {
               {/* SETTINGS HUB */}
               {activeTab === 'settings' && (
                 <AdminSettings />
+              )}
+
+              {/* COUPONS MANAGER */}
+              {activeTab === 'coupons' && (
+                <CouponManager />
               )}
             </motion.div>
           </AnimatePresence>

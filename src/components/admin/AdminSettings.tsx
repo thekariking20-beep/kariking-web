@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User as UserIcon, Store, ShoppingCart, Truck, Bell, Shield, Save, Camera, Mail, Phone, Lock, Eye, EyeOff, MapPin, Check } from 'lucide-react';
+import { User as UserIcon, Store, ShoppingCart, Truck, Bell, Shield, Save, Camera, Mail, Phone, Lock, Eye, EyeOff, MapPin, Check, Trash2, Loader2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -12,6 +12,7 @@ import ImageUploadDropzone from '../ImageUploadDropzone';
 import StaffManagement from './StaffManagement';
 import bcrypt from 'bcryptjs';
 import { updatePassword } from 'firebase/auth';
+import { cleanupDuplicateUsers, CleanupReport } from '../../lib/cleanupDuplicates';
 
 const defaultSettings: SystemSettings = {
   business: {
@@ -59,6 +60,10 @@ export default function AdminSettings() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changingPassword, setChangingPassword] = useState(false);
+
+  // Cleanup state
+  const [cleaningUp, setCleaningUp] = useState(false);
+  const [cleanupReport, setCleanupReport] = useState<CleanupReport | null>(null);
 
   const allTabs = [
     { id: 'profile', label: 'Profile Settings', icon: UserIcon },
@@ -542,6 +547,74 @@ export default function AdminSettings() {
                       <button onClick={handleLogoutAll} className="px-5 py-2.5 bg-white border-2 border-red-200 text-red-600 hover:bg-red-50 font-bold rounded-xl transition-colors shrink-0">
                         Logout Now
                       </button>
+                    </div>
+
+                    {/* 🧹 Duplicate Users Cleanup */}
+                    <div className="p-5 border border-amber-200 rounded-2xl bg-amber-50/30 space-y-4">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div>
+                          <h5 className="font-black text-gray-900 flex items-center gap-2">
+                            <Trash2 className="w-4 h-4 text-amber-600" />
+                            Clean Duplicate Users
+                          </h5>
+                          <p className="text-xs text-gray-500 mt-1 max-w-sm">Scan the users collection for phone duplicates, merge data, and delete extras.</p>
+                        </div>
+                        <button 
+                          onClick={async () => {
+                            if (!window.confirm('This will permanently delete duplicate user documents. Continue?')) return;
+                            setCleaningUp(true);
+                            setCleanupReport(null);
+                            try {
+                              const report = await cleanupDuplicateUsers();
+                              setCleanupReport(report);
+                              if (report.duplicatesDeleted > 0) {
+                                showToast(`🧹 Cleaned ${report.duplicatesDeleted} duplicate user docs!`, 'success');
+                              } else {
+                                showToast('No duplicates found. Database is clean! ✅', 'success');
+                              }
+                            } catch (err) {
+                              showToast('Cleanup failed. Check console.', 'error');
+                            } finally {
+                              setCleaningUp(false);
+                            }
+                          }}
+                          disabled={cleaningUp}
+                          className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl transition-colors shrink-0 flex items-center gap-2 disabled:opacity-50"
+                        >
+                          {cleaningUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                          {cleaningUp ? 'Scanning...' : 'Run Cleanup'}
+                        </button>
+                      </div>
+
+                      {/* Cleanup Report */}
+                      {cleanupReport && (
+                        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+                          <h6 className="font-bold text-gray-900 text-sm">Cleanup Report</h6>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-black text-gray-900">{cleanupReport.totalUsers}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Total Docs</p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-black text-blue-600">{cleanupReport.uniquePhones}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Unique Phones</p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-black text-amber-600">{cleanupReport.duplicatesFound}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Duplicates</p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-2xl font-black text-green-600">{cleanupReport.duplicatesDeleted}</p>
+                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Deleted</p>
+                            </div>
+                          </div>
+                          {cleanupReport.errors.length > 0 && (
+                            <div className="text-xs text-red-600 bg-red-50 rounded-lg p-2">
+                              {cleanupReport.errors.map((e, i) => <p key={i}>❌ {e}</p>)}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                  </div>
               </div>

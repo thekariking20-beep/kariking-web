@@ -280,14 +280,16 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // Verify password against stored hash in provisionedStaff
       const formattedPhone = `+91${phoneNumber.replace(/\D/g, '')}`;
       const provDoc = await getDoc(doc(db, 'provisionedStaff', formattedPhone));
       let staffData: any = null;
+
+      // ─── Single deterministic email: {digits}@kariking.staff ─────────────
+      const derivedEmail = `${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
       
       if (!provDoc.exists()) {
         if (formattedPhone === '+916380886374') {
-          // 🚀 AUTO-PROVISION MASTER ADMIN (First Password Run)
+          // 🚀 AUTO-PROVISION MASTER ADMIN (First Run Only)
           const initialPasswordHash = await bcrypt.hash('Admin@123', 10);
           staffData = {
             phone: formattedPhone,
@@ -300,25 +302,13 @@ export default function Login() {
           await setDoc(doc(db, 'provisionedStaff', formattedPhone), staffData);
           
           try {
-            const derivedEmail = `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
             const { createUserWithEmailAndPassword } = await import('firebase/auth');
             await createUserWithEmailAndPassword(auth, derivedEmail, 'Admin@123');
-            // Write base user doc for the new Auth UID
-            const newUid = auth.currentUser?.uid;
-            if (newUid) {
-               await setDoc(doc(db, 'users', newUid), {
-                 uid: newUid,
-                 phone: formattedPhone,
-                 role: 'admin',
-                 profileComplete: true,
-                 referralCode: newUid.slice(0, 6).toUpperCase(),
-                 coins: 0,
-                 lockedCoins: 0,
-                 createdAt: new Date().toISOString()
-               });
+          } catch (e: any) {
+            // If email already exists, that's fine — we'll sign in below
+            if (e.code !== 'auth/email-already-in-use') {
+              console.error("Firebase auth provision for auto-admin: ", e);
             }
-          } catch (e) {
-            console.error("Firebase auth collision for auto-admin: ", e);
           }
         } else {
           setError('Staff account not found.');
@@ -327,23 +317,16 @@ export default function Login() {
         }
       } else {
         staffData = provDoc.data();
-        // Fallback migration: if existing admin doc lacks a password Hash (from old OTP-only days)
+        // Migration: if existing admin doc lacks a passwordHash (from old OTP-only days)
         if (!staffData.passwordHash && formattedPhone === '+916380886374') {
           const initialPasswordHash = await bcrypt.hash('Admin@123', 10);
           staffData.passwordHash = initialPasswordHash;
           staffData.mustChangePassword = true;
           await setDoc(doc(db, 'provisionedStaff', formattedPhone), staffData, { merge: true });
-          
-          try {
-            const derivedEmail = `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
-            const { createUserWithEmailAndPassword } = await import('firebase/auth');
-            await createUserWithEmailAndPassword(auth, derivedEmail, 'Admin@123');
-          } catch (e) {
-            console.error("Firebase auth collision for legacy auto-admin: ", e);
-          }
         }
       }
 
+      // ─── Validate password against stored bcrypt hash ───────────────────
       let isValidPassword = false;
       if (staffData.passwordHash) {
         isValidPassword = await bcrypt.compare(password, staffData.passwordHash);
@@ -355,14 +338,6 @@ export default function Login() {
         staffData.passwordHash = initialPasswordHash;
         staffData.mustChangePassword = true;
         await setDoc(doc(db, 'provisionedStaff', formattedPhone), staffData, { merge: true });
-        
-        try {
-          const derivedEmail = `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
-          const { createUserWithEmailAndPassword } = await import('firebase/auth');
-          await createUserWithEmailAndPassword(auth, derivedEmail, 'Admin@123');
-        } catch (e) {
-          console.error("Firebase auth collision recovery: ", e);
-        }
         isValidPassword = true;
       }
       
@@ -372,40 +347,46 @@ export default function Login() {
         return;
       }
 
-      // Password correct — sign in with Firebase Email+Password
-      const derivedEmail = formattedPhone === '+916380886374' 
-        ? `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff` 
-        : `${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
-      
-      try {
-        await signInWithEmailAndPassword(auth, derivedEmail, password);
-      } catch (authErr: any) {
-        // If account doesn't exist in Firebase Auth yet, auto-provision for master admin gracefully
-        // Note: Modern Firebase SDKs return invalid-credential for both bad passwords AND missing users to prevent enumeration
-        if ((authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') && formattedPhone === '+916380886374') {
-          try {
-            const { createUserWithEmailAndPassword } = await import('firebase/auth');
-            await createUserWithEmailAndPassword(auth, derivedEmail, password);
-          } catch (createErr: any) {
-            if (createErr.code === 'auth/email-already-in-use') {
-              // Forced manual password reset sync workaround!
-              setError('Password desync. Attempting hard bypass...');
-              const overrideEmail = `v4_${Date.now()}_${formattedPhone.replace(/\D/g, '')}@kariking.staff`;
-              const { createUserWithEmailAndPassword: fallbackCreate } = await import('firebase/auth');
-              await fallbackCreate(auth, overrideEmail, password);
-            } else {
-              console.error("Auto-provision inline failed:", createErr);
-              setError('Account setup locked. Contact admin support.');
-              setLoading(false);
-              return;
-            }
+      // ─── Sign in with Firebase Email+Password ──────────────────────────
+      // Try multiple email formats to handle legacy accounts
+      const emailFormats = [
+        derivedEmail,                                                          // New: 916380886374@kariking.staff
+        `admin3_${formattedPhone.replace(/\D/g, '')}@kariking.staff`,         // Legacy: admin3_916380886374@kariking.staff
+      ];
+
+      let signedIn = false;
+      for (const email of emailFormats) {
+        try {
+          await signInWithEmailAndPassword(auth, email, password);
+          signedIn = true;
+          break;
+        } catch (authErr: any) {
+          // Continue to next email format
+          if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
+            continue;
           }
-        } else if (authErr.code === 'auth/user-not-found' || authErr.code === 'auth/invalid-credential') {
-          setError('Incorrect password. Please try again.');
+          throw authErr; // Unexpected error
+        }
+      }
+
+      // If no existing account found, create ONE new account (never duplicate)
+      if (!signedIn) {
+        try {
+          const { createUserWithEmailAndPassword } = await import('firebase/auth');
+          await createUserWithEmailAndPassword(auth, derivedEmail, password);
+          signedIn = true;
+        } catch (createErr: any) {
+          if (createErr.code === 'auth/email-already-in-use') {
+            // ⚠️ CRITICAL: NEVER create a fallback email — this was causing duplicates!
+            // The password is wrong for an existing account. Show error.
+            setError('Password mismatch with existing account. Please contact admin support to reset.');
+            setLoading(false);
+            return;
+          }
+          console.error("Account creation failed:", createErr);
+          setError('Account setup failed. Contact admin support.');
           setLoading(false);
           return;
-        } else {
-          throw authErr;
         }
       }
 

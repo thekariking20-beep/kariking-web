@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import {
-  collection, query, where, orderBy, onSnapshot
+  collection, query, where, orderBy, onSnapshot, doc, updateDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
@@ -8,7 +8,7 @@ import { Order } from '../types';
 import { motion } from 'motion/react';
 import {
   CheckCircle2, Package, Zap, Calendar, TrendingUp, Clock,
-  MapPin, Phone, User, Truck, LogOut
+  MapPin, Phone, User, Truck, LogOut, Edit3, Save, Loader2, X
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Link } from 'react-router-dom';
@@ -44,9 +44,28 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ── component ─────────────────────────────────────────────────────────────────
 export default function DeliveryProfile() {
-  const { user, logout } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Name edit state
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(user?.name || '');
+  const [savingName, setSavingName] = useState(false);
+
+  const handleSaveName = async () => {
+    if (!user || !nameInput.trim()) return;
+    setSavingName(true);
+    try {
+      await updateDoc(doc(db, 'users', user.uid), { name: nameInput.trim() });
+      if (refreshUser) await refreshUser();
+      setEditingName(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   // ── Real-time listener: all orders for this partner ──────────────────────
   useEffect(() => {
@@ -103,9 +122,33 @@ export default function DeliveryProfile() {
           <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center">
             <User className="w-8 h-8 text-white" />
           </div>
-          <div>
+          <div className="flex-1">
             <p className="text-white/70 text-xs font-bold uppercase tracking-widest mb-0.5">Delivery Partner</p>
-            <h1 className="text-xl font-black text-white">{user?.name || 'Partner'}</h1>
+            {editingName ? (
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={e => setNameInput(e.target.value)}
+                  className="bg-white/20 backdrop-blur-sm border border-white/30 rounded-lg px-3 py-1.5 text-white text-sm font-bold outline-none focus:border-white/60 w-full placeholder:text-white/40"
+                  placeholder="Enter your name"
+                  autoFocus
+                />
+                <button onClick={handleSaveName} disabled={savingName || !nameInput.trim()} className="p-1.5 bg-white/20 rounded-lg hover:bg-white/30 disabled:opacity-50">
+                  {savingName ? <Loader2 className="w-4 h-4 text-white animate-spin" /> : <Save className="w-4 h-4 text-white" />}
+                </button>
+                <button onClick={() => { setEditingName(false); setNameInput(user?.name || ''); }} className="p-1.5 bg-white/10 rounded-lg hover:bg-white/20">
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-black text-white">{user?.name || 'Partner'}</h1>
+                <button onClick={() => setEditingName(true)} className="p-1 bg-white/10 rounded-md hover:bg-white/20 transition-colors">
+                  <Edit3 className="w-3.5 h-3.5 text-white/70" />
+                </button>
+              </div>
+            )}
             <p className="text-red-200 text-sm font-medium mt-0.5">{user?.phone}</p>
           </div>
           {/* Online badge */}
@@ -273,8 +316,8 @@ export default function DeliveryProfile() {
         </section>
       </div>
 
-      {/* ─── FLOATING BOTTOM NAV ────────────────────────────────────────── */}
-      <div className="fixed bottom-6 left-6 right-6 max-w-md md:left-1/2 md:-translate-x-1/2 bg-white/90 backdrop-blur-xl border border-white/20 shadow-2xl rounded-3xl px-2 py-2 flex items-center justify-between z-20">
+      {/* ─── FIXED BOTTOM NAV ────────────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/95 backdrop-blur-xl border-t border-gray-200 shadow-2xl px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex items-center justify-between z-[999]">
         <Link to="/delivery" className="flex-1 flex flex-col items-center justify-center py-2 text-gray-400 hover:text-gray-900 transition-colors bg-transparent hover:bg-gray-50 rounded-2xl">
           <Truck className="w-6 h-6 mb-1" />
           <span className="text-[9px] font-black uppercase tracking-widest">Orders</span>

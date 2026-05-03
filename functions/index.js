@@ -8,6 +8,24 @@ initializeApp();
 
 const db = getFirestore();
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const COIN_VALUE = 20; // 1 coin = ₹20
+const COIN_CAP_PERCENT = 0.20; // Max 20% of subtotal payable via coins
+
+// ─── Payment Audit Logger ─────────────────────────────────────────────────────
+async function logPaymentEvent(orderId, event, details = {}) {
+  try {
+    await db.collection("paymentLogs").add({
+      orderId,
+      event,
+      ...details,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error("Payment log write failed:", e);
+  }
+}
+
 // ─── Order Status Notification Templates ──────────────────────────────────────
 function getNotification(status, orderId) {
   const id = orderId ? ` #${orderId.slice(-6).toUpperCase()}` : "";
@@ -52,6 +70,13 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   if (before.status === after.status) return null;
 
   console.log(`📦 Order ${orderId}: ${before.status} → ${after.status}`);
+
+  // Log status transition
+  await logPaymentEvent(orderId, "status_change", {
+    from: before.status,
+    to: after.status,
+    paymentStatus: after.paymentStatus,
+  });
 
   // 1. Notify the customer
   try {
@@ -206,13 +231,13 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   return null;
 });
 
-// ─── Cloud Function: Create Order (Server-Side Pricing + Idempotency) ─────────
+// ─── Cloud Function: Create Order (Server-Side Pricing + Idempotency + Transactions) ─────────
 exports.createOrder = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "User must be logged in to order.");
   }
 
-  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey } = request.data;
+  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey, couponCode } = request.data;
   
   if (!items || !items.length || !address || !phone) {
     throw new HttpsError("invalid-argument", "Missing required fields.");
@@ -270,47 +295,133 @@ exports.createOrder = onCall(async (request) => {
     });
   }
 
-  // Handle coins — secure server-side calculation
-  let discountAmount = 0;
-  let coinsUsed = 0;
-  const COIN_VALUE = 20;
+  // ─── Server-side Coupon Validation & Atomic Usage Tracking ──────────────
+  let couponDiscount = 0;
+  let appliedCouponId = null;
+  let appliedCouponCode = null;
 
-  if (useCoins) {
-    const userDoc = await db.doc(`users/${userId}`).get();
-    const availableCoins = userDoc.data().coins || 0;
+  if (couponCode && typeof couponCode === 'string' && couponCode.trim()) {
+    const upperCode = couponCode.trim().toUpperCase();
 
-    if (availableCoins > 0) {
-      const maxCoins = Math.min(
-        availableCoins,
-        Math.floor(totalPrice / COIN_VALUE)
-      );
-      coinsUsed = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
-      discountAmount = coinsUsed * COIN_VALUE;
+    // Find coupon
+    const couponSnap = await db.collection("coupons")
+      .where("code", "==", upperCode)
+      .limit(1)
+      .get();
 
-      // For QR payments: coins deducted only AFTER admin verification
-      // For Coins-only: deduct immediately (payment is instant)
-      if (paymentMethod !== 'qr' && coinsUsed > 0) {
-        await userDoc.ref.update({
-          coins: FieldValue.increment(-coinsUsed)
-        });
+    if (!couponSnap.empty) {
+      const couponDoc = couponSnap.docs[0];
+      const coupon = couponDoc.data();
 
-        await db.collection("coinTransactions").add({
-          userId,
-          amount: coinsUsed,
-          type: "spending",
-          source: "Order Discount",
-          createdAt: new Date().toISOString()
-        });
+      // Validate coupon in a transaction to prevent race conditions on usedCount
+      const couponResult = await db.runTransaction(async (transaction) => {
+        const freshCoupon = (await transaction.get(couponDoc.ref)).data();
+        if (!freshCoupon) return { valid: false };
+        if (!freshCoupon.isActive) return { valid: false };
+
+        const now = new Date();
+        if (freshCoupon.validTill && new Date(freshCoupon.validTill) < now) return { valid: false };
+        if (freshCoupon.validFrom && new Date(freshCoupon.validFrom) > now) return { valid: false };
+        if (totalPrice < freshCoupon.minOrder) return { valid: false };
+        if (freshCoupon.totalUsageLimit > 0 && freshCoupon.usedCount >= freshCoupon.totalUsageLimit) return { valid: false };
+
+        // Calculate discount
+        let disc = 0;
+        if (freshCoupon.discountType === 'flat') {
+          disc = freshCoupon.discountValue;
+        } else if (freshCoupon.discountType === 'percentage') {
+          disc = Math.round((totalPrice * freshCoupon.discountValue) / 100);
+          if (freshCoupon.maxDiscount > 0 && disc > freshCoupon.maxDiscount) {
+            disc = freshCoupon.maxDiscount;
+          }
+        }
+        disc = Math.min(disc, totalPrice);
+
+        // Atomically increment usage count
+        transaction.update(couponDoc.ref, { usedCount: FieldValue.increment(1) });
+
+        return { valid: true, discount: disc };
+      });
+
+      if (couponResult.valid) {
+        couponDiscount = couponResult.discount;
+        appliedCouponId = couponDoc.id;
+        appliedCouponCode = upperCode;
       }
     }
+  }
+
+  const subtotalAfterCoupon = Math.max(0, totalPrice - couponDiscount);
+
+  // ─── Handle coins — ATOMIC via Firestore Transaction ──────────────────
+  let discountAmount = couponDiscount;
+  let coinsUsed = 0;
+
+  if (useCoins && paymentMethod !== 'qr') {
+    // Coins-only or coins + coupon: deduct atomically inside a transaction
+    const coinResult = await db.runTransaction(async (transaction) => {
+      const userRef = db.doc(`users/${userId}`);
+      const userSnap = await transaction.get(userRef);
+      if (!userSnap.exists) throw new HttpsError("not-found", "User not found.");
+
+      const userData = userSnap.data();
+      const availableCoins = userData.coins || 0;
+      if (availableCoins <= 0) return { coinsUsed: 0, coinDiscount: 0 };
+
+      // Enforce 20% cap on subtotal after coupon
+      const maxCoinValue = Math.floor(subtotalAfterCoupon * COIN_CAP_PERCENT);
+      const maxCoinsByValue = Math.floor(maxCoinValue / COIN_VALUE);
+      const maxCoinsByBalance = availableCoins;
+      const maxCoins = Math.min(maxCoinsByBalance, maxCoinsByValue);
+
+      const actualCoins = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
+      if (actualCoins <= 0) return { coinsUsed: 0, coinDiscount: 0 };
+
+      const coinDiscount = actualCoins * COIN_VALUE;
+
+      // Atomically deduct coins
+      transaction.update(userRef, { coins: FieldValue.increment(-actualCoins) });
+
+      return { coinsUsed: actualCoins, coinDiscount };
+    });
+
+    coinsUsed = coinResult.coinsUsed;
+    discountAmount += coinResult.coinDiscount;
+
+    // Log coin transaction (outside main transaction for non-blocking)
+    if (coinsUsed > 0) {
+      await db.collection("coinTransactions").add({
+        userId,
+        amount: coinsUsed,
+        type: "spending",
+        source: "Order Discount",
+        createdAt: new Date().toISOString()
+      });
+    }
+  } else if (useCoins && paymentMethod === 'qr') {
+    // QR flow: calculate coins but DON'T deduct yet — deduct on admin approval
+    const userDoc = await db.doc(`users/${userId}`).get();
+    const availableCoins = (userDoc.exists && userDoc.data().coins) || 0;
+    if (availableCoins > 0) {
+      const maxCoinValue = Math.floor(subtotalAfterCoupon * COIN_CAP_PERCENT);
+      const maxCoinsByValue = Math.floor(maxCoinValue / COIN_VALUE);
+      const maxCoins = Math.min(availableCoins, maxCoinsByValue);
+      coinsUsed = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
+      discountAmount += coinsUsed * COIN_VALUE;
+    }
+  }
+
+  // Track coupon in user's usedCoupons array
+  if (appliedCouponCode) {
+    await db.doc(`users/${userId}`).update({
+      usedCoupons: FieldValue.arrayUnion(appliedCouponCode)
+    });
   }
 
   const finalAmount = Math.max(0, totalPrice - discountAmount) + (deliveryFee || 0);
   const now = new Date().toISOString();
 
   // ─── Status Machine ─────────────────────────────────────────────────────
-  // QR orders start as 'awaiting_payment' until user submits UTR
-  // Coins-only orders that cover the full amount are immediately 'paid'
   let paymentStatus = 'pending';
   if (paymentMethod === 'coins' && finalAmount <= 0) {
     paymentStatus = 'paid';
@@ -331,6 +442,8 @@ exports.createOrder = onCall(async (request) => {
     phone,
     coinsUsed,
     pendingCoinsDeduction: paymentMethod === 'qr' ? coinsUsed : 0,
+    couponCode: appliedCouponCode || null,
+    couponDiscount: couponDiscount,
     discountAmount,
     deliveryCharge: deliveryFee || 0,
     utrNumber: null,
@@ -340,6 +453,18 @@ exports.createOrder = onCall(async (request) => {
   };
 
   const docRef = await db.collection("orders").add(orderData);
+  
+  // ─── Payment Audit Log ──────────────────────────────────────────────────
+  await logPaymentEvent(docRef.id, "order_created", {
+    userId,
+    paymentMethod,
+    paymentStatus,
+    totalAmount: totalPrice,
+    couponDiscount,
+    coinsUsed,
+    finalAmount,
+  });
+
   console.log(`[EVENT: orderCreated] Order ${docRef.id} successfully created. Status: ${paymentStatus}`);
   if (paymentMethod === 'qr') {
     console.log(`[EVENT: paymentStarted] Payment flow initiated for order ${docRef.id} via UPI QR.`);
@@ -409,6 +534,13 @@ exports.submitUtr = onCall(async (request) => {
     updatedAt: now,
   });
 
+  // ─── Payment Audit Log ──────────────────────────────────────────────────
+  await logPaymentEvent(orderId, "utr_submitted", {
+    userId: request.auth.uid,
+    utrNumber: trimmedUtr,
+    amount: order.finalAmount,
+  });
+
   console.log(`[EVENT: utrSubmitted] UTR ${trimmedUtr} submitted for order ${orderId}`);
 
   // Notify admins
@@ -436,7 +568,7 @@ exports.submitUtr = onCall(async (request) => {
   return { success: true, message: "UTR submitted. Payment is under review." };
 });
 
-// ─── Cloud Function: Verify QR Payment (Admin-Only) ──────────────────────────
+// ─── Cloud Function: Verify QR Payment (Admin-Only, Transactional) ───────────
 exports.verifyQrPayment = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Must be logged in.");
@@ -467,11 +599,27 @@ exports.verifyQrPayment = onCall(async (request) => {
   const now = new Date().toISOString();
 
   if (action === 'approve') {
-    // Deduct pending coins
+    // ─── ATOMIC coin deduction via transaction ──────────────────────────
     if (order.pendingCoinsDeduction > 0) {
-      await db.doc(`users/${order.userId}`).update({
-        coins: FieldValue.increment(-order.pendingCoinsDeduction)
+      await db.runTransaction(async (transaction) => {
+        const userRef = db.doc(`users/${order.userId}`);
+        const userSnap = await transaction.get(userRef);
+        if (!userSnap.exists) throw new HttpsError("not-found", "User not found.");
+
+        const userData = userSnap.data();
+        const currentCoins = userData.coins || 0;
+
+        // Safety: if user somehow spent coins elsewhere, deduct only what's available
+        const actualDeduction = Math.min(order.pendingCoinsDeduction, currentCoins);
+
+        if (actualDeduction > 0) {
+          transaction.update(userRef, {
+            coins: FieldValue.increment(-actualDeduction)
+          });
+        }
       });
+
+      // Log coin transaction
       await db.collection("coinTransactions").add({
         userId: order.userId,
         amount: order.pendingCoinsDeduction,
@@ -487,6 +635,13 @@ exports.verifyQrPayment = onCall(async (request) => {
       verifiedAt: now,
       verifiedBy: request.auth.uid,
       updatedAt: now
+    });
+
+    // ─── Payment Audit Log ────────────────────────────────────────────────
+    await logPaymentEvent(orderId, "payment_approved", {
+      verifiedBy: request.auth.uid,
+      coinsDeducted: order.pendingCoinsDeduction,
+      finalAmount: order.finalAmount,
     });
 
     // Notify customer
@@ -515,6 +670,12 @@ exports.verifyQrPayment = onCall(async (request) => {
       rejectedAt: now,
       rejectedBy: request.auth.uid,
       updatedAt: now
+    });
+
+    // ─── Payment Audit Log ────────────────────────────────────────────────
+    await logPaymentEvent(orderId, "payment_rejected", {
+      rejectedBy: request.auth.uid,
+      reason: rejectReason || "Payment could not be verified",
     });
 
     // Notify customer

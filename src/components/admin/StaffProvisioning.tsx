@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Shield, UserPlus, Phone, Loader2, CheckCircle2 } from 'lucide-react';
-import { collection, query, where, getDocs, setDoc, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, setDoc, updateDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -27,24 +27,45 @@ export default function StaffProvisioning() {
     try {
       const formattedPhone = `+91${cleanedPhone}`;
 
-      // Check if user already exists
+      // Check if user already exists in users collection
       const q = query(collection(db, 'users'), where('phone', '==', formattedPhone));
       const snapshot = await getDocs(q);
 
       if (!snapshot.empty) {
-         setError('A user with this phone number already exists.');
-         setLoading(false);
-         return;
+        // User exists — update their role instead of blocking
+        const existingDoc = snapshot.docs[0];
+        await updateDoc(doc(db, 'users', existingDoc.id), { role: role });
+        
+        // Also update/create provisionedStaff entry
+        const provRef = doc(db, 'provisionedStaff', formattedPhone);
+        await setDoc(provRef, {
+          phone: formattedPhone,
+          role: role,
+          provisionedAt: new Date().toISOString(),
+          status: 'claimed' // Already has an account
+        }, { merge: true });
+
+        setSuccess(`✅ Updated existing user ${formattedPhone} to ${role.toUpperCase()} role.`);
+        setPhone('');
+        setLoading(false);
+        return;
       }
 
-      // We explicitly provision a placeholder. Their Firebase Auth UID will be generated 
-      // when they actually login via OTP. Firebase Auth merges on phone number natively
-      // IF we let them create an account. Actually, since we use Phone Auth, they will just
-      // login and generate a UID. We need to reserve their role based on phone, but since
-      // we don't have their UID yet, it's tricky.
-      // Better approach: When they login (in AuthContext), it checks if there is a 'provisionedStaff' entry.
-      // Let's create a 'provisionedStaff' collection.
-      
+      // Check if already provisioned but not yet claimed
+      const existingProv = await getDoc(doc(db, 'provisionedStaff', formattedPhone));
+      if (existingProv.exists() && existingProv.data().status === 'pending') {
+        // Update the existing provision
+        await updateDoc(doc(db, 'provisionedStaff', formattedPhone), {
+          role: role,
+          provisionedAt: new Date().toISOString(),
+        });
+        setSuccess(`Updated pending provision for ${formattedPhone} to ${role.toUpperCase()}.`);
+        setPhone('');
+        setLoading(false);
+        return;
+      }
+
+      // New provision — create entry
       const docRef = doc(db, 'provisionedStaff', formattedPhone);
       await setDoc(docRef, {
         phone: formattedPhone,

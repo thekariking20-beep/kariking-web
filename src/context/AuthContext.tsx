@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, increment, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, deleteDoc, increment, addDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { User } from '../types';
 import { registerPushNotifications } from '../lib/notifications';
@@ -99,9 +99,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Register FCM token in background (non-blocking)
           registerPushNotifications(fUser.uid).catch(() => {});
         } else {
-          // New user — create their document
+          // New UID — but check if this phone already has a user doc (PREVENT DUPLICATES)
           const referredBy = localStorage.getItem('pendingReferralCode');
+          // phoneNumber and isPasswordAuth are already available from the outer scope (line 67-76)
 
+          // ─── PHONE UNIQUENESS GUARD ─────────────────────────────────
+          // Check if a user doc already exists for this phone under a DIFFERENT UID
+          if (phoneNumber) {
+            const phoneQuery = query(collection(db, 'users'), where('phone', '==', phoneNumber));
+            const existingSnap = await getDocs(phoneQuery);
+            
+            if (!existingSnap.empty) {
+              // Found existing user doc(s) for this phone — migrate to current UID
+              // Pick the best doc: prefer the one with most data
+              const existingDocs = existingSnap.docs.sort((a, b) => {
+                const aData = a.data();
+                const bData = b.data();
+                // Prefer docs with names, then by createdAt descending
+                if (aData.name && !bData.name) return -1;
+                if (!aData.name && bData.name) return 1;
+                return (bData.createdAt || '').localeCompare(aData.createdAt || '');
+              });
+              
+              const bestDoc = existingDocs[0];
+              const bestData = bestDoc.data() as User;
+              
+              // Migrate: create doc under new UID, delete old ones
+              const migratedUser: User = {
+                ...bestData,
+                uid: fUser.uid, // Update UID to current auth UID
+              };
+              
+              await setDoc(doc(db, 'users', fUser.uid), migratedUser);
+              
+              // Delete all old duplicate docs (except the new one we just created)
+              for (const oldDoc of existingDocs) {
+                if (oldDoc.id !== fUser.uid) {
+                  try {
+                    await deleteDoc(doc(db, 'users', oldDoc.id));
+                    console.log(`🧹 Cleaned duplicate user doc: ${oldDoc.id} (phone: ${phoneNumber})`);
+                  } catch (e) {
+                    console.warn(`Could not delete old user doc ${oldDoc.id}:`, e);
+                  }
+                }
+              }
+              
+              setUser(migratedUser);
+              registerPushNotifications(fUser.uid).catch(() => {});
+              setLoading(false);
+              return; // Skip normal user creation — we migrated
+            }
+          }
+
+          // ─── NORMAL NEW USER CREATION (no existing phone found) ──────
           // Check for provisioning (staff pre-registered by admin)
           let assignedRole: User['role'] = 'user';
           let profileComplete = false; // ALL new users must complete onboarding
@@ -142,20 +192,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const referrerSnap = await getDocs(referrersQuery);
             if (!referrerSnap.empty) {
               const referrerDoc = referrerSnap.docs[0];
-              await updateDoc(doc(db, 'users', referrerDoc.id), {
-                lockedCoins: increment(5)
-              });
+              
+              // Fraud prevention: Block self-referral
+              const isSelfReferral = referrerDoc.id === fUser.uid || 
+                referrerDoc.data().phone === phoneNumber;
+              
+              if (!isSelfReferral) {
+                await updateDoc(doc(db, 'users', referrerDoc.id), {
+                  lockedCoins: increment(5)
+                });
 
-              await addDoc(collection(db, 'referrals'), {
-                referrerId: referrerDoc.id,
-                referrerPhone: referrerDoc.data().phone || '',
-                referredUserId: fUser.uid,
-                referredUserPhone: phoneNumber || '',
-                status: 'pending',
-                reward: 5,
-                rewardGiven: false,
-                createdAt: new Date().toISOString()
-              });
+                await addDoc(collection(db, 'referrals'), {
+                  referrerId: referrerDoc.id,
+                  referrerPhone: referrerDoc.data().phone || '',
+                  referredUserId: fUser.uid,
+                  referredUserPhone: phoneNumber || '',
+                  status: 'pending',
+                  reward: 5,
+                  rewardGiven: false,
+                  createdAt: new Date().toISOString()
+                });
+              } else {
+                console.warn('🚫 Self-referral blocked:', phoneNumber);
+              }
             }
             localStorage.removeItem('pendingReferralCode');
           }

@@ -39,7 +39,7 @@ function ProtectedRoute({
 }) {
   const { user, loading, isDashboardUser, isDelivery, isStaff } = useAuth();
 
-  if (loading) return null; // Root loader handles this
+  if (loading) return <FullScreenLoader isVisible />;
   if (!user) return <Navigate to="/login" replace />;
   
   // Profile Completion Gate (applies to ALL users unless skipped)
@@ -75,7 +75,7 @@ function ProtectedRoute({
 function LoginRoute() {
   const { user, loading } = useAuth();
   
-  if (loading) return null; // Root loader handles this
+  if (loading) return <FullScreenLoader isVisible />;
   if (user) return <Navigate to="/" replace />;
   
   return <Login />;

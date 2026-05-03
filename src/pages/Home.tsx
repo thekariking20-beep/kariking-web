@@ -78,9 +78,15 @@ export default function Home() {
   const navigate = useNavigate();
   const { categories: MAIN_CATEGORIES } = useCategories();
 
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(() => {
+    // Instant load from cache
+    try {
+      const cached = sessionStorage.getItem('kk_products_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
   const [cmsContent, setCmsContent] = useState<HomepageContent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !sessionStorage.getItem('kk_products_cache'));
   const [cmsLoading, setCmsLoading] = useState(true);
   const [favorites, setFavorites] = useState<Product[]>([]);
 
@@ -91,6 +97,8 @@ export default function Home() {
     const unsub = onSnapshot(q, snap => {
       const prods = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
       setProducts(prods);
+      // Persist to sessionStorage for instant future loads
+      try { sessionStorage.setItem('kk_products_cache', JSON.stringify(prods)); } catch {}
       if (user && prods.length > 0) {
         setFavorites([prods[0], prods[prods.length > 1 ? 1 : 0]]);
       }

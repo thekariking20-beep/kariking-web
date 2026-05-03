@@ -27,6 +27,7 @@ export interface User {
   verifiedAt?: string;
   createdAt: string;
   notificationEnabled?: boolean;
+  usedCoupons?: string[];    // coupon codes this user has redeemed
 }
 
 export interface UserAddress {
@@ -227,6 +228,8 @@ export interface Order {
   phone: string;
   coinsUsed: number;
   discountAmount: number;
+  couponCode?: string;        // applied coupon code
+  couponDiscount?: number;    // discount from coupon
   deliveryCharge?: number;
   deliveryPartnerId?: string;
   assignedAt?: string;
@@ -282,4 +285,22 @@ export interface SystemSettings {
     requireOtp: boolean;
   };
   updatedAt: string;
+}
+
+// ─── Coupon System ─────────────────────────────────────────────────────────
+export interface Coupon {
+  id: string;
+  code: string;
+  discountType: 'flat' | 'percentage';
+  discountValue: number;      // ₹ amount or %
+  minOrder: number;           // minimum subtotal to apply
+  maxDiscount: number;        // cap for percentage coupons
+  usageLimit: number;         // per-user limit (1 = one-time)
+  totalUsageLimit: number;    // global limit across all users
+  usedCount: number;          // current global usage
+  isActive: boolean;
+  validFrom: string;          // ISO date
+  validTill: string;          // ISO date
+  forNewUsers: boolean;       // first-order only
+  createdAt: string;
 }

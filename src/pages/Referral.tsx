@@ -235,6 +235,58 @@ export default function Referral() {
         </div>
       </section>
 
+      {/* Coin Transaction History */}
+      <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+        <div className="p-8 border-b border-gray-50 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-amber-50 p-2 rounded-lg">
+              <Coins className="w-5 h-5 text-amber-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900">Coin History</h2>
+          </div>
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+            {transactions.length} Transactions
+          </span>
+        </div>
+        
+        <div className="divide-y divide-gray-50">
+          {loading ? (
+            <div className="p-12 text-center text-gray-400">Loading transactions...</div>
+          ) : transactions.length === 0 ? (
+            <div className="p-12 text-center">
+              <p className="text-gray-500">No coin transactions yet. Refer friends to earn coins!</p>
+            </div>
+          ) : (
+            transactions.map((tx) => (
+              <div key={tx.id} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={cn(
+                    "p-2 rounded-xl shrink-0",
+                    tx.type === 'earning' ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+                  )}>
+                    {tx.type === 'earning' ? <ArrowRight className="w-4 h-4 rotate-[-45deg]" /> : <ArrowRight className="w-4 h-4 rotate-[135deg]" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-gray-900 text-sm truncate">{tx.source}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {new Date(tx.createdAt).toLocaleDateString('en-IN', {
+                        day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                      })}
+                    </p>
+                  </div>
+                </div>
+                <span className={cn(
+                  "font-black text-sm shrink-0 ml-3",
+                  tx.type === 'earning' ? "text-green-600" : "text-red-600"
+                )}>
+                  {tx.type === 'earning' ? '+' : '-'}{tx.amount} coins
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
       {/* Coin Usage Info */}
       <section className="bg-yellow-50 p-8 rounded-3xl border border-yellow-100 flex flex-col md:flex-row items-center gap-8">
         <div className="bg-yellow-100 p-6 rounded-full">

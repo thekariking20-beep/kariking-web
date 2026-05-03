@@ -89,6 +89,8 @@ export default function App() {
       {/* FullScreenLoader overlays everything while auth resolves */}
       <FullScreenLoader isVisible={loading} />
 
+      {/* Only mount Router + routes AFTER auth finishes — prevents lazy-load flash behind loader */}
+      {!loading && (
       <Router>
         <Suspense fallback={<PageLoader />}>
           <Routes>
@@ -171,6 +173,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </Router>
+      )}
     </>
   );
 }

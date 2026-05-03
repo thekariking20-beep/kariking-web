@@ -125,10 +125,10 @@ export function DeliverySkeleton() {
 // ─── Full Page Loader (Suspense fallback) ─────────────────────────────────────
 export function PageLoader() {
   return (
-    <div className="flex items-center justify-center h-screen bg-[#f8f8f8]">
+    <div className="flex items-center justify-center h-screen bg-[#0b0b0b]">
       <div className="text-center space-y-4">
-        <div className="w-12 h-12 mx-auto border-4 border-gray-200 border-t-red-600 rounded-full animate-spin" />
-        <p className="text-sm font-bold text-gray-400">Loading...</p>
+        <div className="w-12 h-12 mx-auto border-4 border-white/10 border-t-red-600 rounded-full animate-spin" />
+        <p className="text-sm font-bold text-white/30">Loading...</p>
       </div>
     </div>
   );

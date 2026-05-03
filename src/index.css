@@ -6,9 +6,9 @@
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* Premium Body */
+/* Premium Body — starts dark (matching loader), transitions to light after auth */
 body {
-  background: #F8F8F8;
+  background: #0b0b0b;
   color: #111;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

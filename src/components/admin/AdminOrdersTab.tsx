@@ -1,16 +1,18 @@
 import React, { useState } from 'react';
 import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown } from 'lucide-react';
 import { Order, User, BulkBooking } from '../../types';
-import { httpsCallable } from 'firebase/functions';
-import { functions, db } from '../../firebase';
+import { db } from '../../firebase';
 import { downloadInvoice } from '../../lib/invoiceGenerator';
-import { collection, query, onSnapshot, orderBy, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, doc, updateDoc, runTransaction } from 'firebase/firestore';
 
 interface AdminOrdersTabProps {
   orders: Order[];
   deliveryPartners: User[];
   assignDeliveryPartner: (orderId: string, partnerId: string) => Promise<void>;
   updateOrderStatus: (orderId: string, newStatus: Order['status']) => Promise<void>;
+  loadMoreOrders?: () => void;
+  hasMoreOrders?: boolean;
+  loadingMoreOrders?: boolean;
 }
 
 // ─── Payment Badge Component ────────────────────────────────────────────
@@ -59,12 +61,56 @@ function QrVerifyActions({ orderId }: { orderId: string }) {
     
     setVerifying(action);
     try {
-      const verifyFn = httpsCallable(functions, 'verifyQrPayment');
-      await verifyFn({ orderId, action, rejectReason });
+      const orderRef = doc(db, 'orders', orderId);
+      const now = new Date().toISOString();
+
+      if (action === 'approve') {
+        // Use a transaction so we can safely read + deduct coins atomically
+        await runTransaction(db, async (transaction) => {
+          const orderSnap = await transaction.get(orderRef);
+          if (!orderSnap.exists()) throw new Error('Order not found.');
+          const order = orderSnap.data();
+
+          if (order.paymentStatus !== 'under_review') {
+            throw new Error('Order is not under review.');
+          }
+
+          // Deduct pending coins if any
+          if (order.pendingCoinsDeduction > 0) {
+            const userRef = doc(db, 'users', order.userId);
+            const userSnap = await transaction.get(userRef);
+            if (userSnap.exists()) {
+              const currentCoins = userSnap.data().coins || 0;
+              const actualDeduction = Math.min(order.pendingCoinsDeduction, currentCoins);
+              if (actualDeduction > 0) {
+                transaction.update(userRef, { coins: currentCoins - actualDeduction });
+              }
+            }
+          }
+
+          // Update order status
+          const newHistory = [...(order.statusHistory || []), { status: 'Order Placed', time: now }];
+          transaction.update(orderRef, {
+            paymentStatus: 'confirmed',
+            pendingCoinsDeduction: 0,
+            verifiedAt: now,
+            updatedAt: now,
+            statusHistory: newHistory,
+          });
+        });
+      } else {
+        // Reject — simple update, no coin logic
+        await updateDoc(orderRef, {
+          paymentStatus: 'rejected',
+          rejectionReason: rejectReason,
+          updatedAt: now,
+        });
+      }
+
       setDone(action === 'approve' ? 'approved' : 'rejected');
-    } catch (err) {
+    } catch (err: any) {
       console.error('QR verify error:', err);
-      alert('Verification failed. Please try again.');
+      alert(`Verification failed: ${err.message || 'Unknown error'}. Please try again.`);
     }
     setVerifying(null);
   };
@@ -98,6 +144,7 @@ function QrVerifyActions({ orderId }: { orderId: string }) {
     </div>
   );
 }
+
 
 // ─── Order Card Component ────────────────────────────────────────────────
 function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrderStatus, accentColor }: {
@@ -195,7 +242,7 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
   );
 }
 
-export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus }: AdminOrdersTabProps) {
+export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus, loadMoreOrders, hasMoreOrders, loadingMoreOrders }: AdminOrdersTabProps) {
   const [bookings, setBookings] = React.useState<BulkBooking[]>([]);
 
   // Real-time listener for the separated Custom Meat Bookings layout
@@ -254,6 +301,15 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
               />
             ))}
             {orders.filter(o => !o.type || o.type === 'normal').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No normal orders yet</p>}
+            {hasMoreOrders && loadMoreOrders && (
+              <button
+                onClick={loadMoreOrders}
+                disabled={loadingMoreOrders}
+                className="w-full py-3 text-xs font-bold text-gray-500 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                {loadingMoreOrders ? 'Loading...' : 'Load More Orders'}
+              </button>
+            )}
           </div>
         </div>
 

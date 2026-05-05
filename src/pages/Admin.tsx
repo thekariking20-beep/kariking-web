@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit, getDocs, startAfter, DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
 import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers } from 'lucide-react';
@@ -34,6 +34,13 @@ export default function Admin() {
 
   const [loading, setLoading] = useState(true);
   const [orderLimit, setOrderLimit] = useState(50);
+  const [lastOrderDoc, setLastOrderDoc] = useState<DocumentSnapshot | null>(null);
+  const [hasMoreOrders, setHasMoreOrders] = useState(true);
+  const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
+  const [lastUserDoc, setLastUserDoc] = useState<DocumentSnapshot | null>(null);
+  const [hasMoreUsers, setHasMoreUsers] = useState(true);
+  const [loadingMoreUsers, setLoadingMoreUsers] = useState(false);
+  const PAGE_SIZE = 50;
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [listenersActive, setListenersActive] = useState(true);
@@ -92,13 +99,15 @@ export default function Admin() {
   useEffect(() => {
     if (!listenersActive) return; // Skip when idle
     setLoading(true);
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(orderLimit));
+    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
     const unsubscribe = onSnapshot(q, (snap) => {
-      setOrders(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
+      if (snap.docs.length > 0) setLastOrderDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreOrders(snap.docs.length >= PAGE_SIZE);
       setLoading(false);
     });
     return () => unsubscribe();
-  }, [orderLimit, listenersActive]);
+  }, [listenersActive]);
 
   // ─── Real-time listeners for ALL admin data ─────────────────────────────────
   useEffect(() => {
@@ -129,8 +138,13 @@ export default function Admin() {
     // Users (admin only)
     if (isAdmin) {
       unsubs.push(onSnapshot(
-        query(collection(db, 'users'), orderBy('createdAt', 'desc')),
-        snap => { setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as User))); setLoading(false); },
+        query(collection(db, 'users'), orderBy('createdAt', 'desc'), limit(PAGE_SIZE)),
+        snap => {
+          setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as User)));
+          if (snap.docs.length > 0) setLastUserDoc(snap.docs[snap.docs.length - 1]);
+          setHasMoreUsers(snap.docs.length >= PAGE_SIZE);
+          setLoading(false);
+        },
         err => console.error('Users listener:', err)
       ));
 
@@ -145,6 +159,50 @@ export default function Admin() {
     setLoading(false);
     return () => unsubs.forEach(u => u());
   }, [isAdmin, listenersActive]);
+
+  // ─── Pagination: Load More Orders ────────────────────────────────────────
+  const loadMoreOrders = async () => {
+    if (!lastOrderDoc || loadingMoreOrders || !hasMoreOrders) return;
+    setLoadingMoreOrders(true);
+    try {
+      const q = query(
+        collection(db, 'orders'),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastOrderDoc),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const newOrders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+      setOrders(prev => [...prev, ...newOrders]);
+      if (snap.docs.length > 0) setLastOrderDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreOrders(snap.docs.length >= PAGE_SIZE);
+    } catch (err) {
+      console.error('Load more orders failed:', err);
+    }
+    setLoadingMoreOrders(false);
+  };
+
+  // ─── Pagination: Load More Users ─────────────────────────────────────────
+  const loadMoreUsers = async () => {
+    if (!lastUserDoc || loadingMoreUsers || !hasMoreUsers) return;
+    setLoadingMoreUsers(true);
+    try {
+      const q = query(
+        collection(db, 'users'),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastUserDoc),
+        limit(PAGE_SIZE)
+      );
+      const snap = await getDocs(q);
+      const newUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as unknown as User));
+      setUsers(prev => [...prev, ...newUsers]);
+      if (snap.docs.length > 0) setLastUserDoc(snap.docs[snap.docs.length - 1]);
+      setHasMoreUsers(snap.docs.length >= PAGE_SIZE);
+    } catch (err) {
+      console.error('Load more users failed:', err);
+    }
+    setLoadingMoreUsers(false);
+  };
 
   // --- Handlers for Products ---
   const handleProductSubmit = async (e: React.FormEvent) => {
@@ -469,6 +527,9 @@ export default function Admin() {
                   deliveryPartners={deliveryPartners}
                   assignDeliveryPartner={assignDeliveryPartner}
                   updateOrderStatus={updateOrderStatus}
+                  loadMoreOrders={loadMoreOrders}
+                  hasMoreOrders={hasMoreOrders}
+                  loadingMoreOrders={loadingMoreOrders}
                 />
               )}
 
@@ -935,8 +996,17 @@ export default function Admin() {
                         ))}
                       </tbody>
                     </table>
-                    <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-400 font-medium">
-                      Showing {uniqueUsers.length} unique users {totalDuplicates > 0 ? `(${totalDuplicates} duplicates hidden)` : ''}
+                    <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-400 font-medium flex items-center justify-between">
+                      <span>Showing {uniqueUsers.length} unique users {totalDuplicates > 0 ? `(${totalDuplicates} duplicates hidden)` : ''}</span>
+                      {hasMoreUsers && (
+                        <button
+                          onClick={loadMoreUsers}
+                          disabled={loadingMoreUsers}
+                          className="px-4 py-2 text-xs font-bold text-gray-600 bg-gray-100 border border-gray-200 rounded-lg hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                        >
+                          {loadingMoreUsers ? 'Loading...' : 'Load More Users'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

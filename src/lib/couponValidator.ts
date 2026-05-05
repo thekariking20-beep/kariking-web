@@ -1,4 +1,4 @@
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { Coupon, User } from '../types';
 
@@ -27,8 +27,24 @@ export async function validateCoupon(
 
   // ── Fetch coupon by code ──────────────────────────────────────────────────
   const couponsRef = collection(db, 'coupons');
-  const q = query(couponsRef, where('code', '==', upperCode));
-  const snap = await getDocs(q);
+  const q = query(couponsRef, where('code', '==', upperCode), limit(1));
+  let snap;
+  try {
+    snap = await getDocs(q);
+  } catch (queryErr: any) {
+    console.error('Coupon query error:', queryErr);
+    return fail('Unable to verify coupon. Please try again.');
+  }
+
+  // Fallback: try using the code as the document ID directly
+  if (snap.empty) {
+    try {
+      const directDoc = await getDoc(doc(db, 'coupons', upperCode));
+      if (directDoc.exists() && directDoc.data()?.code === upperCode) {
+        snap = { empty: false, docs: [directDoc] } as any;
+      }
+    } catch { /* ignore fallback errors */ }
+  }
 
   if (snap.empty) return fail('Invalid coupon code.');
 
@@ -40,11 +56,17 @@ export async function validateCoupon(
 
   // ── Date range check ──────────────────────────────────────────────────────
   const now = new Date();
-  if (coupon.validFrom && new Date(coupon.validFrom) > now) {
-    return fail('This coupon is not yet valid.');
+  if (coupon.validFrom && coupon.validFrom.trim()) {
+    const fromDate = new Date(coupon.validFrom);
+    if (!isNaN(fromDate.getTime()) && fromDate > now) {
+      return fail('This coupon is not yet valid.');
+    }
   }
-  if (coupon.validTill && new Date(coupon.validTill) < now) {
-    return fail('This coupon has expired.');
+  if (coupon.validTill && coupon.validTill.trim()) {
+    const tillDate = new Date(coupon.validTill);
+    if (!isNaN(tillDate.getTime()) && tillDate < now) {
+      return fail('This coupon has expired.');
+    }
   }
 
   // ── Minimum order check ───────────────────────────────────────────────────
@@ -68,15 +90,10 @@ export async function validateCoupon(
 
   // ── New user gate ─────────────────────────────────────────────────────────
   if (coupon.forNewUsers) {
-    // Check if user has any completed orders
-    const ordersRef = collection(db, 'orders');
-    const ordersQ = query(
-      ordersRef,
-      where('userId', '==', user.uid),
-      where('status', '==', 'Delivered')
-    );
-    const ordersSnap = await getDocs(ordersQ);
-    if (!ordersSnap.empty) {
+    // Use the user's usedCoupons array or order count from their profile
+    // This avoids a compound Firestore query that requires a composite index
+    const usedCoupons = user.usedCoupons || [];
+    if (usedCoupons.length > 0) {
       return fail('This coupon is valid for first orders only.');
     }
   }

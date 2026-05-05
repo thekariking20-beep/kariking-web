@@ -43,6 +43,14 @@ service cloud.firestore {
 
       // Admin can write anything
       allow write: if isAdmin();
+
+      // ─── User Addresses Subcollection ────────────────────────────────
+      match /addresses/{addressId} {
+        // Users can fully manage their own addresses
+        allow read, write: if isOwner(userId);
+        // Admin/Manager can view addresses (for order/delivery management)
+        allow read: if isDashboardUser();
+      }
     }
 
     // ─── Orders Collection ───────────────────────────────────────────────

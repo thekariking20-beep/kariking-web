@@ -4,6 +4,33 @@ import { db } from '../firebase';
 import { useAuth } from './AuthContext';
 import { UserAddress } from '../types';
 
+// ─── localStorage cache keys ───────────────────────────────────────────────
+const CACHE_KEY_ADDRESSES = 'kk_addresses_cache';
+const CACHE_KEY_SELECTED = 'kk_selected_address_id';
+
+/** Read cached addresses from localStorage (instant load, no network) */
+function getCachedAddresses(): UserAddress[] {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_ADDRESSES);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Write addresses to localStorage cache */
+function setCachedAddresses(addresses: UserAddress[]) {
+  try {
+    localStorage.setItem(CACHE_KEY_ADDRESSES, JSON.stringify(addresses));
+  } catch { /* quota exceeded — non-critical */ }
+}
+
+/** Clear cache on logout */
+function clearAddressCache() {
+  localStorage.removeItem(CACHE_KEY_ADDRESSES);
+  localStorage.removeItem(CACHE_KEY_SELECTED);
+}
+
 interface AddressContextType {
   /** All saved addresses for the current user */
   addresses: UserAddress[];
@@ -27,13 +54,16 @@ const AddressContext = createContext<AddressContextType | undefined>(undefined);
 
 export function AddressProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const [addresses, setAddresses] = useState<UserAddress[]>([]);
+
+  // Initialize from cache for instant display (no loading flash)
+  const [addresses, setAddresses] = useState<UserAddress[]>(() => getCachedAddresses());
   const [loading, setLoading] = useState(true);
 
   // ─── Real-time listener on users/{uid}/addresses ──────────────────────────
   useEffect(() => {
     if (!user || user.uid.startsWith('demo-')) {
       setAddresses([]);
+      clearAddressCache();
       setLoading(false);
       return;
     }
@@ -48,10 +78,13 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
         if (a.id !== user?.selectedAddressId && b.id === user?.selectedAddressId) return 1;
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
+
       setAddresses(data);
+      setCachedAddresses(data); // Persist to localStorage
       setLoading(false);
     }, (err) => {
       console.error('Address listener error:', err);
+      // Fall back to cached data instead of showing empty
       setLoading(false);
     });
 
@@ -74,11 +107,18 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
   const setDefaultAddress = useCallback(async (address: UserAddress) => {
     if (!user || user.uid.startsWith('demo-')) return;
 
-    // Update selectedAddressId + defaultAddress (single source of truth sync)
-    await updateDoc(doc(db, 'users', user.uid), {
-      selectedAddressId: address.id,
-      address: address.fullAddress,
-    });
+    try {
+      // Update selectedAddressId + defaultAddress (single source of truth sync)
+      await updateDoc(doc(db, 'users', user.uid), {
+        selectedAddressId: address.id,
+        address: address.fullAddress,
+      });
+      // Cache the selection
+      localStorage.setItem(CACHE_KEY_SELECTED, address.id);
+    } catch (err) {
+      console.error('Failed to set default address:', err);
+      throw err; // Re-throw so caller can show error
+    }
   }, [user]);
 
   // ─── Save address ─────────────────────────────────────────────────────────
@@ -94,37 +134,68 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
       createdAt: address.createdAt || new Date().toISOString(),
     };
 
-    // Save to users/{uid}/addresses/{id}
-    await setDoc(doc(db, `users/${user.uid}/addresses`, refId), newAddress);
+    // Optimistic update — show in UI immediately
+    setAddresses(prev => {
+      const existing = prev.findIndex(a => a.id === refId);
+      if (existing >= 0) {
+        const updated = [...prev];
+        updated[existing] = newAddress;
+        return updated;
+      }
+      return [newAddress, ...prev];
+    });
 
-    // If first address or explicitly default, sync to user root doc
-    if (isFirst || address.isDefault) {
-      await updateDoc(doc(db, 'users', user.uid), {
-        selectedAddressId: refId,
-        address: newAddress.fullAddress,
-      });
+    try {
+      // Save to users/{uid}/addresses/{id}
+      await setDoc(doc(db, `users/${user.uid}/addresses`, refId), newAddress);
+
+      // If first address or explicitly default, sync to user root doc
+      if (isFirst || address.isDefault) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          selectedAddressId: refId,
+          address: newAddress.fullAddress,
+        });
+        localStorage.setItem(CACHE_KEY_SELECTED, refId);
+      }
+    } catch (err) {
+      console.error('Failed to save address:', err);
+      // Rollback optimistic update
+      setAddresses(prev => prev.filter(a => a.id !== refId));
+      throw err; // Re-throw so caller can show error
     }
   }, [user, addresses]);
 
   // ─── Delete address ───────────────────────────────────────────────────────
   const deleteAddress = useCallback(async (id: string) => {
     if (!user || user.uid.startsWith('demo-')) return;
-    await deleteDoc(doc(db, `users/${user.uid}/addresses`, id));
 
-    // Auto fallback if the deleted address was selected
-    if (user.selectedAddressId === id) {
-      const remaining = addresses.filter(a => a.id !== id);
-      if (remaining.length > 0) {
-        await updateDoc(doc(db, 'users', user.uid), {
-          selectedAddressId: remaining[0].id,
-          address: remaining[0].fullAddress,
-        });
-      } else {
-        await updateDoc(doc(db, 'users', user.uid), {
-          selectedAddressId: null,
-          address: null,
-        });
+    // Optimistic removal
+    const prevAddresses = [...addresses];
+    setAddresses(prev => prev.filter(a => a.id !== id));
+
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/addresses`, id));
+
+      // Auto fallback if the deleted address was selected
+      if (user.selectedAddressId === id) {
+        const remaining = prevAddresses.filter(a => a.id !== id);
+        if (remaining.length > 0) {
+          await updateDoc(doc(db, 'users', user.uid), {
+            selectedAddressId: remaining[0].id,
+            address: remaining[0].fullAddress,
+          });
+        } else {
+          await updateDoc(doc(db, 'users', user.uid), {
+            selectedAddressId: null,
+            address: null,
+          });
+        }
       }
+    } catch (err) {
+      console.error('Failed to delete address:', err);
+      // Rollback
+      setAddresses(prevAddresses);
+      throw err;
     }
   }, [user, addresses]);
 

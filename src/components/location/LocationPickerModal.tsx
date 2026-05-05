@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MapPin, X, Home, Briefcase, ChevronRight, AlertCircle, Tag } from 'lucide-react';
+import { MapPin, X, Home, Briefcase, ChevronRight, AlertCircle, Tag, CheckCircle2, Loader2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useAddress } from '../../context/AddressContext';
 import { cn } from '../../lib/utils';
@@ -64,8 +64,15 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
   const [pincode, setPincode] = useState('');
   const [saveAs, setSaveAs] = useState<'Home' | 'Work' | 'Other'>('Home');
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  // Derived: is form valid for submission?
+  const isFormValid = useMemo(() => {
+    return Object.keys(validate(street, city, pincode)).length === 0;
+  }, [street, city, pincode]);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -76,6 +83,8 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
       setSaveAs('Home');
       setErrors({});
       setTouched({});
+      setSaveSuccess(false);
+      setSaveError('');
     }
   }, [isOpen]);
 
@@ -86,6 +95,7 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSaveError('');
 
     const validationErrors = validate(street, city, pincode);
     setErrors(validationErrors);
@@ -116,9 +126,14 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
         });
       }
 
-      onClose();
-    } catch (error) {
+      // Show success state briefly before closing
+      setSaveSuccess(true);
+      setTimeout(() => {
+        onClose();
+      }, 800);
+    } catch (error: any) {
       console.error('Error saving address:', error);
+      setSaveError(error?.message || 'Failed to save address. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -293,15 +308,39 @@ export default function LocationPickerModal({ isOpen, onClose, onSave }: Locatio
                   </motion.div>
                 )}
 
+                {/* Save Error */}
+                {saveError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center gap-2"
+                  >
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    <p className="text-xs font-bold text-red-600">{saveError}</p>
+                  </motion.div>
+                )}
+
                 {/* Confirm Button */}
                 <div className="pt-2 pb-2">
                   <button
                     type="submit"
-                    disabled={saving}
-                    className="ripple-btn w-full bg-premium-gradient text-white py-4 rounded-xl flex shadow-[0_8px_20px_rgba(122,0,0,0.3)] items-center justify-center gap-2 hover:shadow-[0_12px_25px_rgba(122,0,0,0.4)] disabled:opacity-50 active:scale-95 font-black uppercase tracking-wide transition-all"
+                    disabled={saving || saveSuccess || !isFormValid}
+                    className={cn(
+                      "ripple-btn w-full py-4 rounded-xl flex items-center justify-center gap-2 font-black uppercase tracking-wide transition-all active:scale-95",
+                      saveSuccess
+                        ? "bg-green-500 text-white shadow-[0_8px_20px_rgba(34,197,94,0.3)]"
+                        : isFormValid
+                          ? "bg-premium-gradient text-white shadow-[0_8px_20px_rgba(122,0,0,0.3)] hover:shadow-[0_12px_25px_rgba(122,0,0,0.4)]"
+                          : "bg-gray-200 text-gray-400 cursor-not-allowed"
+                    )}
                   >
-                    {saving ? 'Saving...' : 'Confirm Location'}
-                    <ChevronRight className="w-5 h-5" />
+                    {saveSuccess ? (
+                      <><CheckCircle2 className="w-5 h-5" /> Address Saved!</>
+                    ) : saving ? (
+                      <><Loader2 className="w-5 h-5 animate-spin" /> Saving...</>
+                    ) : (
+                      <><span>Confirm Location</span> <ChevronRight className="w-5 h-5" /></>
+                    )}
                   </button>
                 </div>
               </form>

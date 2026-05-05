@@ -125,9 +125,9 @@ export default function Orders() {
   const [retryLoading, setRetryLoading] = useState(false);
 
   const handleRetryUtr = async (orderId: string) => {
-    const trimmed = retryUtr.trim();
-    if (!/^\d{12}$/.test(trimmed)) {
-      setRetryError('UTR must be exactly 12 digits');
+    const trimmed = retryUtr.trim().replace(/\s/g, '');
+    if (trimmed.length < 10 || trimmed.length > 22) {
+      setRetryError('UTR must be 10-22 characters');
       return;
     }
     setRetryLoading(true);
@@ -301,7 +301,7 @@ export default function Orders() {
                           {order.paymentMethod === 'qr' && order.paymentStatus === 'awaiting_payment' && order.status !== 'Cancelled' && (
                             <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
                               <p className="text-sm font-bold text-amber-800">⏳ Awaiting Payment</p>
-                              <p className="text-xs text-amber-600 mt-0.5">Please pay via UPI and submit your 12-digit UTR number.</p>
+                              <p className="text-xs text-amber-600 mt-0.5">Please pay via UPI and submit your UTR/transaction reference number.</p>
                             </div>
                           )}
 
@@ -329,17 +329,17 @@ export default function Orders() {
                                 <div className="space-y-2">
                                   <input
                                     type="text"
-                                    inputMode="numeric"
-                                    placeholder="Enter new 12-digit UTR"
-                                    maxLength={12}
+                                    inputMode="text"
+                                    placeholder="Enter UTR / Reference ID"
+                                    maxLength={22}
                                     value={retryUtr}
-                                    onChange={(e) => { setRetryUtr(e.target.value.replace(/\D/g, '')); setRetryError(''); }}
+                                    onChange={(e) => { setRetryUtr(e.target.value.replace(/[^a-zA-Z0-9]/g, '')); setRetryError(''); }}
                                     className="w-full p-2.5 border border-gray-300 rounded-lg text-sm text-center tracking-widest font-medium outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                                   />
                                   {retryError && <p className="text-[10px] text-red-600 font-bold text-center">{retryError}</p>}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleRetryUtr(order.id); }}
-                                    disabled={retryLoading || retryUtr.length !== 12}
+                                    disabled={retryLoading || retryUtr.trim().length < 10}
                                     className="w-full bg-blue-600 text-white font-bold py-2.5 rounded-lg text-sm shadow-md active:scale-95 transition-all disabled:opacity-50"
                                   >
                                     {retryLoading ? 'Submitting...' : 'Re-Submit UTR'}

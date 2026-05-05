@@ -83,9 +83,10 @@ export default function Cart() {
   const canPayFullyWithCoins = coinDiscount >= totalPrice - couponDiscount + deliveryFee;
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
+  const upiAmount = useMemo(() => (Math.round(finalTotal * 100) / 100).toFixed(2), [finalTotal]);
   const upiString = useMemo(() => 
-    `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`,
-    [finalTotal]
+    `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order`,
+    [upiAmount]
   );
 
   // ─── Instant QR Generation (client-side, zero latency) ────────────────
@@ -265,9 +266,9 @@ export default function Cart() {
 
   // ─── UTR Submit Handler (waits for background order if needed) ──────────
   const handleQrConfirm = async () => {
-    const trimmedUtr = utrInput.trim();
-    if (!/^\d{12}$/.test(trimmedUtr)) {
-      setUtrError('UTR must be exactly 12 digits (numbers only)');
+    const trimmedUtr = utrInput.trim().replace(/\s/g, '');
+    if (trimmedUtr.length < 10 || trimmedUtr.length > 22) {
+      setUtrError('Please enter a valid UTR/transaction reference (10-22 characters)');
       return;
     }
     
@@ -302,10 +303,10 @@ export default function Cart() {
       const msg = err?.message || '';
       if (msg.includes('already been used')) {
         setUtrError('This UTR has already been used for another order.');
-      } else if (msg.includes('12 digits')) {
-        setUtrError('UTR must be exactly 12 digits.');
+      } else if (msg.includes('digits')) {
+        setUtrError('UTR format not accepted. Please check the reference number from your UPI app.');
       } else {
-        setUtrError('We could not verify this UTR. Please ensure you have entered the correct 12-digit reference number from your UPI app.');
+        setUtrError('Could not submit UTR. Please check the reference number and try again.');
       }
     } finally {
       setLoadingVerify(false);
@@ -745,13 +746,13 @@ export default function Cart() {
                   <QrCodeIcon className="w-7 h-7 text-blue-600" />
                 </div>
                 <h3 className="text-xl font-black text-gray-900">Scan & Pay</h3>
-                <p className="text-sm text-gray-500 mt-1">Pay ₹{finalTotal} via any UPI app</p>
+                <p className="text-sm text-gray-500 mt-1">Pay ₹{upiAmount} via any UPI app</p>
               </div>
 
               {/* Amount highlight */}
               <div className="bg-green-50 border border-green-100 rounded-xl p-3 mb-4 text-center shadow-sm">
                 <p className="text-xs text-gray-500 font-medium uppercase tracking-widest">Amount to Pay</p>
-                <p className="text-3xl font-black text-green-700 my-1">₹{finalTotal}</p>
+                <p className="text-3xl font-black text-green-700 my-1">₹{upiAmount}</p>
               </div>
 
               {/* QR Code — ALWAYS VISIBLE on top */}
@@ -767,24 +768,24 @@ export default function Cart() {
                 <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
               </div>
 
-              {/* UPI App Buttons — local icons, correct deep links */}
+              {/* UPI App Buttons — Android intent deep links for reliability */}
               <div className="mb-4 grid grid-cols-4 gap-2">
                 <a
-                  href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end;`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/gpay.jpeg" alt="GPay" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">GPay</span>
                 </a>
                 <a
-                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=com.phonepe.app;end;`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/phonepe.jpeg" alt="PhonePe" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">PhonePe</span>
                 </a>
                 <a
-                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${finalTotal}&cu=INR&tn=KariKing_Order`}
+                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=net.one97.paytm;end;`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/paytm.jpeg" alt="Paytm" className="h-8 w-8 object-contain rounded-lg" />
@@ -802,19 +803,21 @@ export default function Cart() {
               {/* UTR Input Field */}
               <div className="mb-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
                 <label className="block text-xs font-bold text-gray-700 uppercase tracking-widest mb-2">
-                  Enter 12-Digit UTR Number
+                  Enter UTR / Transaction Reference
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 312345678901"
+                  placeholder="e.g. 312345678901 or HDFCXXXXXXXXXX"
                   className="w-full p-3 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium text-sm text-center tracking-widest"
                   value={utrInput}
                   onChange={(e) => {
-                    setUtrInput(e.target.value.replace(/\D/g, ''));
+                    // Allow alphanumeric — some banks use mixed formats
+                    setUtrInput(e.target.value.replace(/[^a-zA-Z0-9]/g, ''));
                     setUtrError('');
                   }}
-                  maxLength={12}
+                  maxLength={22}
                 />
+                <p className="text-[9px] text-gray-400 mt-1.5 text-center">Find this in your UPI app → Transaction History → Reference ID</p>
                 {utrError && <p className="text-[10px] text-red-600 font-bold mt-2 text-center">{utrError}</p>}
               </div>
 
@@ -828,7 +831,7 @@ export default function Cart() {
 
               <button
                 onClick={handleQrConfirm}
-                disabled={loadingVerify || utrInput.length !== 12}
+                disabled={loadingVerify || utrInput.trim().length < 10}
                 className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-xl font-black flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all disabled:opacity-50 disabled:shadow-none active:scale-95"
               >
                 {loadingVerify ? (

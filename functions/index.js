@@ -489,10 +489,10 @@ exports.submitUtr = onCall(async (request) => {
     throw new HttpsError("invalid-argument", "Missing orderId or utrNumber.");
   }
 
-  // ─── Strict UTR Validation ──────────────────────────────────────────────
-  const trimmedUtr = utrNumber.trim();
-  if (!/^\d{12}$/.test(trimmedUtr)) {
-    throw new HttpsError("invalid-argument", "UTR must be exactly 12 digits.");
+  // ─── UTR Validation (flexible: supports 10-22 char alphanumeric) ─────────
+  const trimmedUtr = utrNumber.trim().replace(/\s/g, "");
+  if (!/^[a-zA-Z0-9]{10,22}$/.test(trimmedUtr)) {
+    throw new HttpsError("invalid-argument", "UTR must be 10-22 alphanumeric characters.");
   }
 
   // ─── Verify order belongs to this user ──────────────────────────────────

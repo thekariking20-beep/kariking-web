@@ -279,10 +279,17 @@ export default function Cart() {
       // Wait for background order creation if still in progress
       let orderId = qrOrderId;
       if (!orderId && orderPromiseRef.current) {
-        orderId = await orderPromiseRef.current;
+        try {
+          orderId = await orderPromiseRef.current;
+        } catch (orderErr) {
+          // Order creation itself failed — this is NOT a UTR problem
+          setUtrError('Order could not be created. Please close this and try placing your order again.');
+          setLoadingVerify(false);
+          return;
+        }
       }
       if (!orderId) {
-        setUtrError('Order is being created. Please wait a moment and try again.');
+        setUtrError('Order is still being created. Please wait a moment and try again.');
         setLoadingVerify(false);
         return;
       }
@@ -290,10 +297,10 @@ export default function Cart() {
       const submitUtrFn = httpsCallable(functions, 'submitUtr');
       await submitUtrFn({ orderId, utrNumber: trimmedUtr });
       
-      // Coupon tracking is handled atomically by the backend Cloud Function
-
+      // SUCCESS — UTR saved and under review
       setShowQrModal(false);
-      await refreshUser();
+      // refreshUser is best-effort — don't let it block success
+      refreshUser().catch(() => {});
       clearCart();
       setIdempotencyKey('');
       setAppliedCoupon(null);
@@ -301,12 +308,22 @@ export default function Cart() {
       setTimeout(() => navigate('/orders'), 3000);
     } catch (err: any) {
       const msg = err?.message || '';
-      if (msg.includes('already been used')) {
+      const code = err?.code || '';
+      if (msg.includes('already been used') || code === 'already-exists') {
         setUtrError('This UTR has already been used for another order.');
-      } else if (msg.includes('digits')) {
-        setUtrError('UTR format not accepted. Please check the reference number from your UPI app.');
+      } else if (code === 'invalid-argument') {
+        setUtrError('UTR format not accepted. Please copy the exact reference number from your UPI app.');
+      } else if (code === 'failed-precondition') {
+        // Order not in correct state (already submitted / verified)
+        setUtrError('Payment was already submitted for this order. Check your Orders page.');
+      } else if (code === 'not-found') {
+        setUtrError('Order not found. Please close and try again.');
+      } else if (code === 'unavailable' || code === 'deadline-exceeded' || !navigator.onLine) {
+        setUtrError('Network issue. Please check your internet and try again.');
       } else {
-        setUtrError('Could not submit UTR. Please check the reference number and try again.');
+        // Unknown error — still encourage retry, not a scary dead-end
+        console.error('UTR submit error:', err);
+        setUtrError('Submission failed. Please try again in a moment.');
       }
     } finally {
       setLoadingVerify(false);

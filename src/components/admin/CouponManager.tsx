@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy
+  collection, onSnapshot, addDoc, updateDoc, doc, query, orderBy, setDoc
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import type { Coupon } from '../../types';
@@ -58,7 +58,7 @@ export default function CouponManager() {
     setSaving(true);
     setError('');
     try {
-      await addDoc(collection(db, 'coupons'), {
+      const couponRef = await addDoc(collection(db, 'coupons'), {
         code: form.code.trim().toUpperCase(),
         discountType: form.discountType,
         discountValue: Number(form.discountValue),
@@ -73,6 +73,13 @@ export default function CouponManager() {
         forNewUsers: form.forNewUsers,
         createdAt: new Date().toISOString(),
       });
+      // Initialize distributed counter shards (10 shards)
+      const NUM_SHARDS = 10;
+      const shardPromises = [];
+      for (let i = 0; i < NUM_SHARDS; i++) {
+        shardPromises.push(setDoc(doc(db, `coupons/${couponRef.id}/shards/${i}`), { count: 0 }));
+      }
+      await Promise.all(shardPromises);
       setForm(EMPTY_FORM);
       setShowForm(false);
     } catch (e) {

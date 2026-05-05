@@ -87,8 +87,16 @@ service cloud.firestore {
       // Anyone authenticated can read coupons (for validation UI)
       allow read: if isAuthenticated();
       // Only admin can create/update/delete coupons
-      // Usage count increments happen via Cloud Function transaction
+      // Usage count increments happen via Cloud Function (server SDK bypasses rules)
       allow write: if isAdmin();
+
+      // ─── Distributed Counter Shards ─────────────────────────────────
+      match /shards/{shardId} {
+        // Authenticated users need read access for usage count validation
+        allow read: if isAuthenticated();
+        // Admin can initialize shards; Cloud Function increments via server SDK
+        allow write: if isAdmin();
+      }
     }
 
     // ─── Provisioned Staff Collection ────────────────────────────────────

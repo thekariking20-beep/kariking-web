@@ -331,7 +331,17 @@ exports.createOrder = onCall(async (request) => {
         if (freshCoupon.validTill && new Date(freshCoupon.validTill) < now) return { valid: false };
         if (freshCoupon.validFrom && new Date(freshCoupon.validFrom) > now) return { valid: false };
         if (totalPrice < freshCoupon.minOrder) return { valid: false };
-        if (freshCoupon.totalUsageLimit > 0 && freshCoupon.usedCount >= freshCoupon.totalUsageLimit) return { valid: false };
+
+        // ── Distributed counter: sum shards for total usage ──────────────
+        if (freshCoupon.totalUsageLimit > 0) {
+          const shardsSnap = await db.collection(`coupons/${couponDoc.id}/shards`).get();
+          let totalUsed = freshCoupon.usedCount || 0; // fallback to legacy field
+          if (!shardsSnap.empty) {
+            totalUsed = 0;
+            shardsSnap.forEach((s) => { totalUsed += s.data().count || 0; });
+          }
+          if (totalUsed >= freshCoupon.totalUsageLimit) return { valid: false };
+        }
 
         // Calculate discount
         let disc = 0;
@@ -345,8 +355,11 @@ exports.createOrder = onCall(async (request) => {
         }
         disc = Math.min(disc, totalPrice);
 
-        // Atomically increment usage count
-        transaction.update(couponDoc.ref, { usedCount: FieldValue.increment(1) });
+        // ── Distributed counter: increment a random shard ────────────────
+        const NUM_SHARDS = 10;
+        const shardId = Math.floor(Math.random() * NUM_SHARDS).toString();
+        const shardRef = db.doc(`coupons/${couponDoc.id}/shards/${shardId}`);
+        transaction.set(shardRef, { count: FieldValue.increment(1) }, { merge: true });
 
         return { valid: true, discount: disc };
       });

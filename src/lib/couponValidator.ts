@@ -74,9 +74,20 @@ export async function validateCoupon(
     return fail(`Minimum order of ₹${coupon.minOrder} required. Add ₹${coupon.minOrder - subtotal} more.`);
   }
 
-  // ── Global usage limit ────────────────────────────────────────────────────
-  if (coupon.totalUsageLimit > 0 && coupon.usedCount >= coupon.totalUsageLimit) {
-    return fail('This coupon has reached its usage limit.');
+  // ── Global usage limit (distributed counter) ──────────────────────────
+  if (coupon.totalUsageLimit > 0) {
+    // Sum all shard counts for accurate total
+    let totalUsed = coupon.usedCount || 0; // fallback to legacy field
+    try {
+      const shardsSnap = await getDocs(collection(db, `coupons/${couponDoc.id}/shards`));
+      if (!shardsSnap.empty) {
+        totalUsed = 0;
+        shardsSnap.forEach(s => { totalUsed += s.data().count || 0; });
+      }
+    } catch { /* fallback to legacy usedCount */ }
+    if (totalUsed >= coupon.totalUsageLimit) {
+      return fail('This coupon has reached its usage limit.');
+    }
   }
 
   // ── Per-user usage limit ──────────────────────────────────────────────────

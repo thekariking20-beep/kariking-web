@@ -163,7 +163,7 @@ export default function Cart() {
 
   const validationError = getValidationError();
 
-  // ─── Core Checkout Handler (INSTANT QR — order in background) ──────────
+  // ─── Core Checkout Handler (ORDER-FIRST — guaranteed orderId before QR) ────
   const handleCheckout = async () => {
     if (!user) { navigate('/login'); return; }
     if (validationError) { setError(validationError); return; }
@@ -173,57 +173,73 @@ export default function Cart() {
     if (!navigator.onLine) {
       setIsOffline(true);
       pendingCheckoutRef.current = true;
+      checkoutInProgressRef.current = false;
       return;
     }
 
     const rateCheck = checkOrderLimit();
-    if (!rateCheck.allowed) { setError(rateCheck.error); return; }
+    if (!rateCheck.allowed) { setError(rateCheck.error); checkoutInProgressRef.current = false; return; }
 
     let effectiveMethod = paymentMethod;
     if (canPayFullyWithCoins && useCoins) effectiveMethod = 'coins';
 
     setError('');
 
-    // ─── QR Flow: Show modal INSTANTLY, create order in background ─────
+    // ─── QR Flow: Create order FIRST, THEN show modal ───────────────────
     if (effectiveMethod === 'qr' && finalTotal > 0) {
-      setShowQrModal(true); // INSTANT — QR is already pre-generated
-      setOrderCreating(true);
+      setLoading(true); // Show loading on checkout button
 
       // Generate idempotency key
       let iKey = idempotencyKey;
       if (!iKey) { iKey = crypto.randomUUID(); setIdempotencyKey(iKey); }
 
-      // Create order silently in background
-      const orderPromise = (async (): Promise<string> => {
-        const createOrderFn = httpsCallable(functions, 'createOrder');
-        const MAX_RETRIES = 5;
-        for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-          try {
-            const response = await createOrderFn({
-              items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
-              address, phone, useCoins, coinsToUse: coinsBeingUsed,
-              paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
-              couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
-            });
-            const data = response.data as { success: boolean; orderId: string };
-            if (data?.success) {
-              setQrOrderId(data.orderId);
-              setOrderCreating(false);
-              return data.orderId;
-            }
-            throw new Error('order-failed');
-          } catch (err: any) {
-            const code = err?.code || '';
-            if (['invalid-argument', 'failed-precondition'].includes(code)) throw err;
-            if (attempt === MAX_RETRIES) throw err;
-            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+      const createOrderFn = httpsCallable(functions, 'createOrder');
+      const MAX_RETRIES = 3;
+      let orderId = '';
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const response = await createOrderFn({
+            items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+            address, phone, useCoins, coinsToUse: coinsBeingUsed,
+            paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
+            couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
+          });
+          const data = response.data as { success: boolean; orderId: string };
+          if (data?.success && data.orderId) {
+            orderId = data.orderId;
+            break;
           }
+          throw new Error('order-failed');
+        } catch (err: any) {
+          const code = err?.code || '';
+          // Don't retry on validation errors — they'll always fail
+          if (['invalid-argument', 'failed-precondition', 'unauthenticated'].includes(code)) {
+            if (code === 'unauthenticated') navigate('/login');
+            else setError(err?.message || 'Could not create order. Please check your cart and try again.');
+            setLoading(false);
+            checkoutInProgressRef.current = false;
+            return;
+          }
+          // Retry on network/transient errors
+          if (attempt === MAX_RETRIES) {
+            setError('Unable to connect. Please check your internet and try again.');
+            setLoading(false);
+            checkoutInProgressRef.current = false;
+            return;
+          }
+          // Exponential backoff: 1s, 2s, 4s
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
         }
-        throw new Error('exhausted');
-      })();
-      orderPromiseRef.current = orderPromise;
-      // Don't await — let user scan QR while order creates
-      orderPromise.catch(() => setOrderCreating(false));
+      }
+
+      // ── ORDER IS NOW GUARANTEED TO EXIST ──
+      setQrOrderId(orderId);
+      // Persist orderId so user can resume after page refresh
+      try { localStorage.setItem('kk_pending_qr_order', orderId); } catch {}
+      setLoading(false);
+      setShowQrModal(true); // Open modal only when orderId is locked in
+      checkoutInProgressRef.current = false;
       return;
     }
 
@@ -242,9 +258,8 @@ export default function Cart() {
       });
       const data = response.data as { success: boolean; orderId: string; finalAmount: number };
       if (data?.success) {
-        // Coupon tracking is now handled atomically by the backend Cloud Function
         pendingCheckoutRef.current = null;
-        await refreshUser();
+        refreshUser().catch(() => {});
         clearCart();
         setIdempotencyKey('');
         setAppliedCoupon(null);
@@ -264,7 +279,7 @@ export default function Cart() {
     }
   };
 
-  // ─── UTR Submit Handler (waits for background order if needed) ──────────
+  // ─── UTR Submit Handler (orderId is GUARANTEED to exist) ──────────────────
   const handleQrConfirm = async () => {
     const trimmedUtr = utrInput.trim().replace(/\s/g, '');
     if (trimmedUtr.length < 10 || trimmedUtr.length > 22) {
@@ -275,59 +290,69 @@ export default function Cart() {
     setLoadingVerify(true);
     setUtrError('');
     
-    try {
-      // Wait for background order creation if still in progress
-      let orderId = qrOrderId;
-      if (!orderId && orderPromiseRef.current) {
-        try {
-          orderId = await orderPromiseRef.current;
-        } catch (orderErr) {
-          // Order creation itself failed — this is NOT a UTR problem
-          setUtrError('Order could not be created. Please close this and try placing your order again.');
-          setLoadingVerify(false);
-          return;
-        }
-      }
-      if (!orderId) {
-        setUtrError('Order is still being created. Please wait a moment and try again.');
-        setLoadingVerify(false);
-        return;
-      }
-
-      const submitUtrFn = httpsCallable(functions, 'submitUtr');
-      await submitUtrFn({ orderId, utrNumber: trimmedUtr });
-      
-      // SUCCESS — UTR saved and under review
-      setShowQrModal(false);
-      // refreshUser is best-effort — don't let it block success
-      refreshUser().catch(() => {});
-      clearCart();
-      setIdempotencyKey('');
-      setAppliedCoupon(null);
-      setOrderPlaced(true);
-      setTimeout(() => navigate('/orders'), 3000);
-    } catch (err: any) {
-      const msg = err?.message || '';
-      const code = err?.code || '';
-      if (msg.includes('already been used') || code === 'already-exists') {
-        setUtrError('This UTR has already been used for another order.');
-      } else if (code === 'invalid-argument') {
-        setUtrError('UTR format not accepted. Please copy the exact reference number from your UPI app.');
-      } else if (code === 'failed-precondition') {
-        // Order not in correct state (already submitted / verified)
-        setUtrError('Payment was already submitted for this order. Check your Orders page.');
-      } else if (code === 'not-found') {
-        setUtrError('Order not found. Please close and try again.');
-      } else if (code === 'unavailable' || code === 'deadline-exceeded' || !navigator.onLine) {
-        setUtrError('Network issue. Please check your internet and try again.');
-      } else {
-        // Unknown error — still encourage retry, not a scary dead-end
-        console.error('UTR submit error:', err);
-        setUtrError('Submission failed. Please try again in a moment.');
-      }
-    } finally {
+    // orderId is guaranteed — order was created before modal opened
+    const orderId = qrOrderId;
+    if (!orderId) {
+      setUtrError('Session error. Please close and place the order again.');
       setLoadingVerify(false);
+      return;
     }
+
+    const submitUtrFn = httpsCallable(functions, 'submitUtr');
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        await submitUtrFn({ orderId, utrNumber: trimmedUtr });
+        
+        // SUCCESS — UTR saved, payment under review
+        try { localStorage.removeItem('kk_pending_qr_order'); } catch {}
+        setShowQrModal(false);
+        refreshUser().catch(() => {});
+        clearCart();
+        setIdempotencyKey('');
+        setAppliedCoupon(null);
+        setOrderPlaced(true);
+        setTimeout(() => navigate('/orders'), 3000);
+        return; // Exit on success
+      } catch (err: any) {
+        const msg = err?.message || '';
+        const code = err?.code || '';
+
+        // Non-retryable errors — show immediately
+        if (msg.includes('already been used') || code === 'already-exists') {
+          setUtrError('This UTR has already been used for another order.');
+          break;
+        }
+        if (code === 'invalid-argument') {
+          setUtrError('UTR format not accepted. Please copy the exact reference from your UPI app.');
+          break;
+        }
+        if (code === 'failed-precondition') {
+          setUtrError('Payment was already submitted for this order. Check your Orders page.');
+          break;
+        }
+        if (code === 'permission-denied') {
+          setUtrError('Permission error. Please log in again.');
+          break;
+        }
+
+        // Retryable errors — retry silently
+        if (attempt === MAX_RETRIES) {
+          if (code === 'unavailable' || code === 'deadline-exceeded' || !navigator.onLine) {
+            setUtrError('Network issue. Please check your internet and try again.');
+          } else {
+            console.error('UTR submit error:', err);
+            setUtrError('Submission failed. Please try again.');
+          }
+          break;
+        }
+        // Wait before retry: 1s, 2s
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
+    }
+
+    setLoadingVerify(false);
   };
 
   // ─── Empty Cart State ──────────────────────────────────────────────────
@@ -838,11 +863,11 @@ export default function Cart() {
                 {utrError && <p className="text-[10px] text-red-600 font-bold mt-2 text-center">{utrError}</p>}
               </div>
 
-              {/* Order creation status — subtle indicator */}
-              {orderCreating && (
-                <div className="flex items-center justify-center gap-2 mb-3 text-[10px] text-gray-400 font-medium">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  Securing your order...
+              {/* Order confirmed indicator — order is guaranteed to exist */}
+              {qrOrderId && (
+                <div className="flex items-center justify-center gap-2 mb-3 text-[10px] text-green-600 font-bold">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Order #{qrOrderId.slice(-6).toUpperCase()} created — submit UTR after payment
                 </div>
               )}
 

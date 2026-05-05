@@ -79,7 +79,7 @@ export default function Cart() {
   const discountAmount = coinDiscount + couponDiscount;
   
   const deliveryFee = totalPrice >= 500 || totalPrice === 0 ? 0 : 40;
-  const finalTotal = Math.max(0, totalPrice - discountAmount) + deliveryFee;
+  const finalTotal = Math.round((Math.max(0, totalPrice - discountAmount) + deliveryFee) * 100) / 100;
   const canPayFullyWithCoins = coinDiscount >= totalPrice - couponDiscount + deliveryFee;
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
@@ -193,9 +193,10 @@ export default function Cart() {
       let iKey = idempotencyKey;
       if (!iKey) { iKey = crypto.randomUUID(); setIdempotencyKey(iKey); }
 
-      const createOrderFn = httpsCallable(functions, 'createOrder');
+      const createOrderFn = httpsCallable(functions, 'createOrder', { timeout: 120000 });
       const MAX_RETRIES = 3;
       let orderId = '';
+      let lastError: any = null;
 
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -212,7 +213,9 @@ export default function Cart() {
           }
           throw new Error('order-failed');
         } catch (err: any) {
+          lastError = err;
           const code = err?.code || '';
+          console.error(`[Order Attempt ${attempt}/${MAX_RETRIES}]`, code, err?.message || err);
           // Don't retry on validation errors — they'll always fail
           if (['invalid-argument', 'failed-precondition', 'unauthenticated'].includes(code)) {
             if (code === 'unauthenticated') navigate('/login');
@@ -223,7 +226,17 @@ export default function Cart() {
           }
           // Retry on network/transient errors
           if (attempt === MAX_RETRIES) {
-            setError('Unable to connect. Please check your internet and try again.');
+            // Show the REAL error — not a generic "internet" message
+            const realMessage = err?.message || '';
+            if (!navigator.onLine) {
+              setError('You appear to be offline. Please check your internet and try again.');
+            } else if (realMessage.includes('internal') || code === 'internal') {
+              setError('Server error. Please try again in a moment.');
+            } else if (code === 'deadline-exceeded') {
+              setError('Request timed out. Please try again — the server may be busy.');
+            } else {
+              setError(`Order failed: ${realMessage || 'Unknown error'}. Please try again.`);
+            }
             setLoading(false);
             checkoutInProgressRef.current = false;
             return;
@@ -598,7 +611,7 @@ export default function Cart() {
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-0.5">Total Amount</p>
                   <p className="text-3xl font-black text-white" style={{ textShadow: '0 2px 10px rgba(255,45,45,0.3)' }}>
-                    ₹{Math.round(finalTotal * 100) / 100}
+                    ₹{finalTotal.toFixed(2)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -753,7 +766,7 @@ export default function Cart() {
               <>
                 {canPayFullyWithCoins && useCoins 
                   ? `Pay with Coins — Place Order` 
-                  : `Pay ₹${finalTotal} — Place Order`}
+                  : `Pay ₹${finalTotal.toFixed(2)} — Place Order`}
                 <ArrowRight className="w-5 h-5" />
               </>
             )}

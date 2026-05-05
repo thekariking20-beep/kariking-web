@@ -167,12 +167,20 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
         value={order.status}
         onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
       >
-        <option value="Order Placed">Order Placed</option>
-        <option value="Order Received">Order Received</option>
-        <option value="Packed">Packed</option>
-        <option value="Dispatched">Dispatched</option>
-        <option value="Delivered">Delivered</option>
-        <option value="Cancelled">Cancelled</option>
+        {/* Forward-only status transitions */}
+        {(() => {
+          const FLOW: Record<string, string[]> = {
+            'Order Placed':   ['Order Placed', 'Order Received', 'Cancelled'],
+            'Order Received': ['Order Received', 'Packed', 'Cancelled'],
+            'Packed':         ['Packed', 'Dispatched', 'Cancelled'],
+            'Dispatched':     ['Dispatched', 'Delivered', 'Cancelled'],
+            'Delivered':      ['Delivered'],
+            'Cancelled':      ['Cancelled'],
+          };
+          return (FLOW[order.status] || ['Order Placed']).map(s => (
+            <option key={s} value={s}>{s}</option>
+          ));
+        })()}
       </select>
       {order.status === 'Delivered' && (
         <button

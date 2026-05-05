@@ -238,6 +238,8 @@ exports.createOrder = onCall(async (request) => {
     throw new HttpsError("unauthenticated", "User must be logged in to order.");
   }
 
+  try {
+
   const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey, couponCode } = request.data;
   
   if (!items || !items.length || !address || !phone) {
@@ -248,21 +250,26 @@ exports.createOrder = onCall(async (request) => {
 
   // ─── Idempotency Check: prevent duplicate orders on network retries ───────
   if (idempotencyKey) {
-    const existingOrders = await db.collection("orders")
-      .where("userId", "==", userId)
-      .where("idempotencyKey", "==", idempotencyKey)
-      .limit(1)
-      .get();
+    try {
+      const existingOrders = await db.collection("orders")
+        .where("userId", "==", userId)
+        .where("idempotencyKey", "==", idempotencyKey)
+        .limit(1)
+        .get();
 
-    if (!existingOrders.empty) {
-      const existingOrder = existingOrders.docs[0];
-      const existingData = existingOrder.data();
-      console.log(`♻️ Idempotent hit: reusing order ${existingOrder.id}`);
-      return {
-        success: true,
-        orderId: existingOrder.id,
-        finalAmount: existingData.finalAmount
-      };
+      if (!existingOrders.empty) {
+        const existingOrder = existingOrders.docs[0];
+        const existingData = existingOrder.data();
+        console.log(`♻️ Idempotent hit: reusing order ${existingOrder.id}`);
+        return {
+          success: true,
+          orderId: existingOrder.id,
+          finalAmount: existingData.finalAmount
+        };
+      }
+    } catch (idempotencyErr) {
+      // Index may not exist yet — log and proceed (order will still be created)
+      console.warn("Idempotency check failed (missing index?), proceeding:", idempotencyErr.message);
     }
   }
 
@@ -476,6 +483,13 @@ exports.createOrder = onCall(async (request) => {
     orderId: docRef.id,
     finalAmount 
   };
+
+  } catch (err) {
+    // Re-throw HttpsErrors as-is, wrap everything else
+    if (err instanceof HttpsError) throw err;
+    console.error("[createOrder UNHANDLED]", err);
+    throw new HttpsError("internal", err.message || "Order creation failed unexpectedly.");
+  }
 });
 
 // ─── Cloud Function: Submit UTR (User-Side, Server-Validated) ─────────────────

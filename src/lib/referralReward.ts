@@ -65,9 +65,14 @@ export async function processReferralReward(userId: string, orderId: string): Pr
 
     // 5. Reward referrer: unlock locked coins → available coins
     const referrerId = referral.referrerId;
+    // Safety: clamp decrement to prevent lockedCoins going negative
+    const referrerDoc = await getDocs(query(collection(db, 'users'), where('__name__', '==', referrerId)));
+    const currentLocked = referrerDoc.empty ? 0 : (referrerDoc.docs[0].data().lockedCoins || 0);
+    const safeDecrement = Math.min(REFERRER_COIN_REWARD, currentLocked);
+    
     await updateDoc(doc(db, 'users', referrerId), {
       coins: increment(REFERRER_COIN_REWARD),
-      lockedCoins: increment(-REFERRER_COIN_REWARD),
+      lockedCoins: increment(-safeDecrement),
     });
 
     // Log referrer coin transaction

@@ -181,31 +181,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await setDoc(doc(db, 'users', fUser.uid), newUser);
           
           // Handle referral rewards
-          if (referredBy) {
+           if (referredBy) {
             try {
-            const referrersQuery = query(collection(db, 'users'), where('referralCode', '==', referredBy));
-            const referrerSnap = await getDocs(referrersQuery);
-            if (!referrerSnap.empty) {
-              const referrerDoc = referrerSnap.docs[0];
-              
-              const isSelfReferral = referrerDoc.id === fUser.uid || 
-                referrerDoc.data().phone === phoneNumber;
-              
-              if (!isSelfReferral) {
-                await updateDoc(doc(db, 'users', referrerDoc.id), {
-                  lockedCoins: increment(5)
-                });
+            // Guard: check if a referral already exists for this user (prevent duplicate on re-login)
+            const existingRefQuery = query(collection(db, 'referrals'), where('referredUserId', '==', fUser.uid), limit(1));
+            const existingRefSnap = await getDocs(existingRefQuery);
+            if (existingRefSnap.empty) {
+              const referrersQuery = query(collection(db, 'users'), where('referralCode', '==', referredBy));
+              const referrerSnap = await getDocs(referrersQuery);
+              if (!referrerSnap.empty) {
+                const referrerDoc = referrerSnap.docs[0];
+                
+                const isSelfReferral = referrerDoc.id === fUser.uid || 
+                  referrerDoc.data().phone === phoneNumber;
+                
+                if (!isSelfReferral) {
+                  await updateDoc(doc(db, 'users', referrerDoc.id), {
+                    lockedCoins: increment(5)
+                  });
 
-                await addDoc(collection(db, 'referrals'), {
-                  referrerId: referrerDoc.id,
-                  referrerPhone: referrerDoc.data().phone || '',
-                  referredUserId: fUser.uid,
-                  referredUserPhone: phoneNumber || '',
-                  status: 'pending',
-                  reward: 5,
-                  rewardGiven: false,
-                  createdAt: new Date().toISOString()
-                });
+                  await addDoc(collection(db, 'referrals'), {
+                    referrerId: referrerDoc.id,
+                    referrerPhone: referrerDoc.data().phone || '',
+                    referredUserId: fUser.uid,
+                    referredUserPhone: phoneNumber || '',
+                    status: 'pending',
+                    reward: 5,
+                    rewardGiven: false,
+                    createdAt: new Date().toISOString()
+                  });
+                }
               }
             }
             } catch (refErr) {

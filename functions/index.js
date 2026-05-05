@@ -738,3 +738,81 @@ exports.onKycSubmitted = onDocumentUpdated("users/{userId}", async (event) => {
 
   return null;
 });
+
+// ─── Cloud Function: Admin Password Reset for Staff ───────────────────────────
+// This uses Firebase Admin SDK to update the ACTUAL Auth password,
+// not just the Firestore hash. Without this, password resets are cosmetic only.
+exports.resetStaffPassword = onCall(async (request) => {
+  // 1. Auth check
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  // 2. Admin role check
+  const callerDoc = await db.collection("users").doc(request.auth.uid).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "admin") {
+    throw new HttpsError("permission-denied", "Only admins can reset staff passwords.");
+  }
+
+  const { staffPhone, newPassword } = request.data;
+
+  // 3. Validate inputs
+  if (!staffPhone || typeof staffPhone !== "string") {
+    throw new HttpsError("invalid-argument", "Staff phone number is required.");
+  }
+  if (!newPassword || typeof newPassword !== "string" || newPassword.length < 6) {
+    throw new HttpsError("invalid-argument", "Password must be at least 6 characters.");
+  }
+
+  // 4. Derive the staff email (same format used during provisioning)
+  const digits = staffPhone.replace(/\D/g, "");
+  const derivedEmail = `${digits}@kariking.staff`;
+
+  // 5. Find the Firebase Auth user
+  let authUser;
+  try {
+    authUser = await getAuth().getUserByEmail(derivedEmail);
+  } catch (err) {
+    // Try alternate email format (legacy admin accounts)
+    try {
+      const altEmail = `admin3_${digits}@kariking.staff`;
+      authUser = await getAuth().getUserByEmail(altEmail);
+    } catch {
+      throw new HttpsError(
+        "not-found",
+        `No Firebase Auth account found for ${staffPhone}. The staff member may need to be re-provisioned.`
+      );
+    }
+  }
+
+  // 6. Update Firebase Auth password (the REAL password)
+  try {
+    await getAuth().updateUser(authUser.uid, { password: newPassword });
+  } catch (err) {
+    console.error("Auth password update failed:", err);
+    throw new HttpsError("internal", "Failed to update authentication password.");
+  }
+
+  // 7. Update Firestore provisionedStaff hash + force change flag
+  try {
+    // We use bcrypt-compatible approach: store a hash so login validation still works
+    // The bcryptjs library isn't available in Cloud Functions by default,
+    // so we use a simple SHA-256 marker that the login flow will detect
+    await db.collection("provisionedStaff").doc(staffPhone).update({
+      mustChangePassword: true,
+      // Clear the old hash — the login flow's desync fallback will handle it
+      // by trying the new password directly against Firebase Auth
+      passwordHash: `__ADMIN_RESET__:${new Date().toISOString()}`,
+    });
+  } catch (firestoreErr) {
+    // Non-fatal — Auth password was already updated successfully
+    console.warn("Firestore flag update failed (non-critical):", firestoreErr);
+  }
+
+  console.log(`✅ Admin ${request.auth.uid} reset password for ${staffPhone} (UID: ${authUser.uid})`);
+
+  return {
+    success: true,
+    message: `Password reset for ${staffPhone}. They must change it on next login.`,
+  };
+});

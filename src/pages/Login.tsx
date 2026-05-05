@@ -321,7 +321,15 @@ export default function Login() {
 
       // ─── Validate password against stored bcrypt hash ───────────────────
       let isValidPassword = false;
-      if (staffData.passwordHash) {
+      
+      // If hash starts with __ADMIN_RESET__, the password was reset via Cloud Function.
+      // Firebase Auth has the correct password — skip bcrypt and let Auth validate.
+      const isAdminReset = staffData.passwordHash?.startsWith?.('__ADMIN_RESET__');
+      
+      if (isAdminReset) {
+        // Trust Firebase Auth — skip local bcrypt validation
+        isValidPassword = true;
+      } else if (staffData.passwordHash) {
         isValidPassword = await bcrypt.compare(password, staffData.passwordHash);
       }
       

@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, getDoc, query, where, getDocs, updateDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, getAuth } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
-import { db } from '../../firebase';
+import { db, functions } from '../../firebase';
+import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../../context/AuthContext';
 import { ProvisionedStaff } from '../../types';
 import bcrypt from 'bcryptjs';
@@ -95,17 +96,28 @@ export default function StaffManagement() {
     setEditSaving(true);
     setError('');
     try {
-      const newHash = await bcrypt.hash(editPassword, 10);
-      await updateDoc(doc(db, 'provisionedStaff', staffPhone), {
-        passwordHash: newHash,
-        mustChangePassword: true,
+      // Call Cloud Function to update the REAL Firebase Auth password
+      const resetFn = httpsCallable(functions, 'resetStaffPassword');
+      const result = await resetFn({
+        staffPhone: staffPhone,
+        newPassword: editPassword,
       });
+      const data = result.data as { success: boolean; message: string };
+
       setEditPassword('');
       setEditConfirmPassword('');
-      setSuccess(`Password reset for ${staffPhone}. They must change it on next login.`);
+      setSuccess(data.message || `Password reset for ${staffPhone}. They must change it on next login.`);
     } catch (err: any) {
-      console.error(err);
-      setError('Failed to reset password.');
+      console.error('Password reset failed:', err);
+      const code = err?.code || '';
+      const msg = err?.message || '';
+      if (code === 'functions/not-found' || msg.includes('not-found')) {
+        setError(`No auth account found for ${staffPhone}. The staff member may need to be re-added.`);
+      } else if (code === 'functions/permission-denied') {
+        setError('You do not have permission to reset passwords.');
+      } else {
+        setError(msg || 'Failed to reset password. Please try again.');
+      }
     } finally {
       setEditSaving(false);
     }

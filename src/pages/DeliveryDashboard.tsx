@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import {
-  collection, query, where, orderBy, onSnapshot,
+  collection, query, where, orderBy, onSnapshot, limit,
   doc, updateDoc, getDoc, setDoc
-} from 'firebase/firestore';
-import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
 import { processReferralReward } from '../lib/referralReward';
@@ -44,13 +41,8 @@ export default function DeliveryDashboard() {
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
   // ─── Derived lists ────────────────────────────────────────────────────────
-  // Unassigned orders — only visible when online
-  const pendingNewOrders = isOnline ? allOrders.filter(o => !o.deliveryPartnerId && o.status === 'Order Placed') : [];
-  // My active orders (assigned to me, not yet done)
-  const myActiveOrders   = allOrders.filter(o => o.deliveryPartnerId === user?.uid && o.status !== 'Delivered' && o.status !== 'Cancelled');
-  // All active = pending new + my active
-  const activeOrders     = [...pendingNewOrders, ...myActiveOrders];
-  const completedOrders  = allOrders.filter(o => o.deliveryPartnerId === user?.uid && (o.status === 'Delivered' || o.status === 'Cancelled'));
+  const activeOrders     = allOrders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled');
+  const completedOrders  = allOrders.filter(o => o.status === 'Delivered' || o.status === 'Cancelled');
 
   // ─── Fetch partner's online state ──────────────────────────────────────────
   useEffect(() => {
@@ -58,7 +50,7 @@ export default function DeliveryDashboard() {
     getDoc(doc(db, 'users', user.uid)).then(snap => {
       if (snap.exists()) {
         const data = snap.data();
-        setIsOnline(data.isAvailable !== false);
+        setIsOnline(data.isOnline === true);
       }
     });
   }, [user]);
@@ -67,40 +59,41 @@ export default function DeliveryDashboard() {
   useEffect(() => {
     if (!user || !isDelivery) return;
 
-    // 1. Orders assigned to this partner
-    const myQ = query(
+    // 1. Active Orders (Order Received, Packed, Dispatched)
+    const activeQ = query(
       collection(db, 'orders'),
       where('deliveryPartnerId', '==', user.uid),
-      orderBy('createdAt', 'desc')
+      where('status', 'in', ['Order Received', 'Packed', 'Dispatched']),
+      orderBy('createdAt', 'desc'),
+      limit(50)
     );
 
-    let myOrders: Order[] = [];
-    let pendingOrders: Order[] = [];
+    let activeList: Order[] = [];
+    let doneList: Order[] = [];
 
-    const unsub1 = onSnapshot(myQ, snap => {
-      myOrders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+    const unsub1 = onSnapshot(activeQ, snap => {
+      activeList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
       mergeOrders();
-    }, err => { console.error(err); setLoading(false); });
+    }, err => { console.error('Active orders error:', err); setLoading(false); });
 
-    // 2. Unassigned pending orders (visible only when online)
-    const pendingQ = query(
+    // 2. Done Orders (Delivered, Cancelled)
+    const doneQ = query(
       collection(db, 'orders'),
-      where('status', '==', 'Order Placed'),
-      orderBy('createdAt', 'desc')
+      where('deliveryPartnerId', '==', user.uid),
+      where('status', 'in', ['Delivered', 'Cancelled']),
+      orderBy('createdAt', 'desc'),
+      limit(50)
     );
 
-    const unsub2 = onSnapshot(pendingQ, snap => {
-      // Filter client-side: only orders with no deliveryPartnerId
-      pendingOrders = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Order))
-        .filter(o => !o.deliveryPartnerId);
+    const unsub2 = onSnapshot(doneQ, snap => {
+      doneList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
       mergeOrders();
-    }, err => { console.error(err); setLoading(false); });
+    }, err => { console.error('Done orders error:', err); setLoading(false); });
 
     function mergeOrders() {
       // Combine, deduplicate by id, sort by createdAt desc
       const map = new Map<string, Order>();
-      [...myOrders, ...pendingOrders].forEach(o => map.set(o.id, o));
+      [...activeList, ...doneList].forEach(o => map.set(o.id, o));
       const merged = Array.from(map.values()).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
@@ -116,7 +109,7 @@ export default function DeliveryDashboard() {
     if (!user || togglingOnline) return;
     
     // Prevent going offline if there are active holding orders
-    if (isOnline && myActiveOrders.length > 0) {
+    if (isOnline && activeOrders.length > 0) {
       setErrorToast("Cannot go offline while holding active orders!");
       setTimeout(() => setErrorToast(null), 3000);
       return;
@@ -125,7 +118,7 @@ export default function DeliveryDashboard() {
     setTogglingOnline(true);
     try {
       const newState = !isOnline;
-      await setDoc(doc(db, 'users', user.uid), { isAvailable: newState }, { merge: true });
+      await setDoc(doc(db, 'users', user.uid), { isOnline: newState }, { merge: true });
       setIsOnline(newState);
     } catch (e) {
       console.error(e);
@@ -136,27 +129,7 @@ export default function DeliveryDashboard() {
     }
   };
 
-  // ─── Accept (self-assign) an unassigned order ─────────────────────────────
-  const acceptOrder = async (order: Order) => {
-    if (!user || updatingOrderId === order.id) return;
-    setUpdatingOrderId(order.id);
-    try {
-      const now = new Date().toISOString();
-      await updateDoc(doc(db, 'orders', order.id), {
-        deliveryPartnerId: user.uid,
-        assignedAt: now,
-        status: 'Order Received',
-        statusHistory: [...order.statusHistory, { status: 'Order Received', time: now }],
-        updatedAt: now,
-      });
-    } catch (e) {
-      console.error(e);
-      setErrorToast("Failed to accept order. Try again.");
-      setTimeout(() => setErrorToast(null), 3000);
-    } finally {
-      setUpdatingOrderId(null);
-    }
-  };
+
 
   // ─── Update order status ──────────────────────────────────────────────────
   const updateStatus = async (order: Order, newStatus: Order['status']) => {
@@ -397,9 +370,7 @@ export default function DeliveryDashboard() {
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-black text-2xl text-gray-900 leading-none">₹{order.totalAmount}</h3>
-                        {!order.deliveryPartnerId && (
-                          <span className="bg-green-100 text-green-700 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-green-200 animate-pulse">NEW</span>
-                        )}
+
                         {order.type === 'bulk' && <span className="bg-blue-100 text-blue-700 p-1 rounded-lg"><Package className="w-4 h-4"/></span>}
                         {order.type === 'function' && <span className="bg-amber-100 text-amber-600 p-1 rounded-lg"><PartyPopper className="w-4 h-4"/></span>}
                       </div>
@@ -486,16 +457,7 @@ export default function DeliveryDashboard() {
                   {/* ── PRIMARY DELIVERY ACTION BUTTONS ── */}
                   {tab === 'active' && (
                     <div className="mt-4 pt-4 border-t border-gray-100">
-                      {/* 🟢 Accept — for unassigned orders (self-assign) */}
-                      {order.status === 'Order Placed' && !order.deliveryPartnerId && (
-                        <button
-                          onClick={() => acceptOrder(order)}
-                          disabled={updatingOrderId === order.id}
-                          className="w-full bg-green-500 hover:bg-green-600 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-green-500/30 disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-5 h-5" /> {updatingOrderId === order.id ? 'Accepting...' : 'ACCEPT ORDER'}
-                        </button>
-                      )}
+
 
                       {/* Accept (already assigned) → Packed */}
                       {(order.status === 'Order Received') && (

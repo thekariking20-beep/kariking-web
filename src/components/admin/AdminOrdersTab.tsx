@@ -205,7 +205,7 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
         onChange={(e) => assignDeliveryPartner(order.id, e.target.value)}
       >
         <option value="">Assign Delivery Partner</option>
-        {deliveryPartners.filter(p => p.isAvailable !== false).map(p => (
+        {deliveryPartners.filter(p => p.isOnline === true).map(p => (
           <option key={p.uid} value={p.uid}>🟢 {p.name || p.phone}</option>
         ))}
       </select>

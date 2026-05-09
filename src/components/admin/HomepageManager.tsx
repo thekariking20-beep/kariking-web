@@ -362,6 +362,63 @@ export default function HomepageManager() {
                 </div>
               </div>
 
+              {/* ── Live Preview ──────────────────────────────────────── */}
+              {(form.type === 'countdown' || form.type === 'seasonal') && form.title && (
+                <div className="mt-6 pt-5 border-t border-gray-100">
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 block">👁️ Live Preview</label>
+                  <div className="rounded-2xl overflow-hidden shadow-lg" style={{ background: 'linear-gradient(135deg, #0a0000 0%, #8B0000 50%, #D9381E 100%)' }}>
+                    <div className="px-5 py-5 flex flex-col sm:flex-row items-center gap-4">
+                      <div className="flex-1 text-center sm:text-left">
+                        {form.badgeLabel && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-amber-300 bg-amber-400/15 border border-amber-400/20 px-2.5 py-1 rounded-full mb-2">
+                            ⚡ {form.badgeLabel}
+                          </span>
+                        )}
+                        <h4 className="text-white text-lg font-black">{form.title}</h4>
+                        {form.subtitle && <p className="text-white/60 text-xs mt-1">{form.subtitle}</p>}
+                        <div className="flex items-center gap-2 mt-3 justify-center sm:justify-start flex-wrap">
+                          {form.couponCode && (
+                            <span className="inline-flex items-center gap-1.5 bg-white/10 border border-white/15 rounded-lg px-3 py-1.5 text-white text-[10px] font-black uppercase tracking-widest">
+                              🏷️ {form.couponCode}
+                            </span>
+                          )}
+                          {form.buttonText && (
+                            <span className="inline-flex items-center gap-1 bg-white text-red-800 font-black text-[10px] uppercase tracking-widest px-4 py-1.5 rounded-lg shadow-md">
+                              {form.buttonText} ›
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* Timer preview */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {['00', '12', '30', '45'].map((v, i) => (
+                          <React.Fragment key={i}>
+                            {i > 0 && <span className="text-white/30 text-lg font-black mx-0.5">:</span>}
+                            <div className="w-11 h-11 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20 flex items-center justify-center shadow-lg">
+                              <span className="text-white text-lg font-black tabular-nums">{v}</span>
+                            </div>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="h-1 bg-black/30">
+                      <div className="h-full w-1/2 bg-gradient-to-r from-amber-400 via-orange-500 to-red-500" />
+                    </div>
+                  </div>
+                  {form.countdownEndTime && (
+                    <p className="text-[10px] text-gray-400 mt-2 text-center">
+                      ⏱️ Ends: {new Date(form.countdownEndTime).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      {(() => {
+                        const diff = new Date(form.countdownEndTime).getTime() - Date.now();
+                        if (isNaN(diff) || diff <= 0) return ' (expired!)';
+                        const hrs = Math.floor(diff / 3600000);
+                        return ` (${hrs}h from now)`;
+                      })()}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-gray-100">
                 <button type="button" onClick={resetForm} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-50 rounded-xl transition-colors">
                   Cancel

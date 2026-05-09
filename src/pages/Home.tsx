@@ -113,11 +113,10 @@ export default function Home() {
   useEffect(() => {
     const q = query(collection(db, 'homepageContent'), where('isActive', '==', true), orderBy('order', 'asc'));
     const unsub = onSnapshot(q, snap => {
-      console.log('[CMS] homepageContent docs:', snap.size, snap.docs.map(d => ({ id: d.id, type: d.data().type, title: d.data().title })));
       setCmsContent(snap.empty ? [] : snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
       setCmsLoading(false);
     }, (err) => {
-      console.error('[CMS] homepageContent listener error:', err.code, err.message);
+      console.error('[CMS] listener error:', err.code);
       setCmsContent([]);
       setCmsLoading(false);
     });
@@ -157,8 +156,16 @@ export default function Home() {
   const visibleCms = useMemo(() => {
     const now = Date.now();
     return cmsContent.filter(c => {
-      if (c.visibleFrom && new Date(c.visibleFrom).getTime() > now) return false;
-      if (c.visibleUntil && new Date(c.visibleUntil).getTime() < now) return false;
+      try {
+        if (c.visibleFrom) {
+          const from = new Date(c.visibleFrom).getTime();
+          if (!isNaN(from) && from > now) return false;
+        }
+        if (c.visibleUntil) {
+          const until = new Date(c.visibleUntil).getTime();
+          if (!isNaN(until) && until < now) return false;
+        }
+      } catch { /* pass through on invalid dates */ }
       return true;
     });
   }, [cmsContent]);
@@ -168,13 +175,16 @@ export default function Home() {
     return fromCms.length ? fromCms : DEFAULT_BANNERS;
   }, [visibleCms]);
 
-  // Countdown campaigns (type: 'countdown' or seasonal with countdownEnabled)
   const countdownCampaigns = useMemo(() => {
-    return visibleCms.filter(c => 
-      (c.type === 'countdown' || c.type === 'seasonal') && 
-      c.countdownEnabled && 
-      c.countdownEndTime
-    );
+    return visibleCms.filter(c => {
+      if (c.type !== 'countdown' && c.type !== 'seasonal') return false;
+      if (!c.countdownEnabled || !c.countdownEndTime) return false;
+      // Validate the date is parseable and in the future
+      try {
+        const end = new Date(c.countdownEndTime).getTime();
+        return !isNaN(end) && end > Date.now();
+      } catch { return false; }
+    });
   }, [visibleCms]);
 
   // Seasonal campaigns (type: 'seasonal' without countdown, or with expired countdown)

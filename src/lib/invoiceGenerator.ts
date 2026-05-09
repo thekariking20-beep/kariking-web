@@ -377,7 +377,24 @@ export function downloadInvoice(order: Order, customerName?: string) {
   try {
     const doc = generateInvoicePDF(order, customerName);
     const invoiceId = generateInvoiceId(order.id);
-    doc.save(`Kari_King_Invoice_${invoiceId}.pdf`);
+    const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
+
+    // Use manual blob download — more reliable than doc.save() which
+    // some browsers block as a popup when not in a direct user-gesture chain.
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 200);
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);
     alert('Failed to generate invoice. Please try again.');

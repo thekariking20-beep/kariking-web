@@ -113,9 +113,14 @@ export default function Home() {
   useEffect(() => {
     const q = query(collection(db, 'homepageContent'), where('isActive', '==', true), orderBy('order', 'asc'));
     const unsub = onSnapshot(q, snap => {
+      console.log('[CMS] homepageContent docs:', snap.size, snap.docs.map(d => ({ id: d.id, type: d.data().type, title: d.data().title })));
       setCmsContent(snap.empty ? [] : snap.docs.map(d => ({ id: d.id, ...d.data() } as HomepageContent)));
       setCmsLoading(false);
-    }, () => { setCmsContent([]); setCmsLoading(false); });
+    }, (err) => {
+      console.error('[CMS] homepageContent listener error:', err.code, err.message);
+      setCmsContent([]);
+      setCmsLoading(false);
+    });
     return () => unsub();
   }, []);
 

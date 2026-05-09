@@ -37,6 +37,27 @@ const BADGE_COLOR_OPTIONS = [
   { label: 'Black', value: 'bg-gray-900' },
 ];
 
+// Helper: convert ISO string to datetime-local input value (YYYY-MM-DDTHH:mm)
+function isoToLocal(iso: string): string {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch { return ''; }
+}
+
+// Helper: convert datetime-local value to ISO string safely
+function localToIso(val: string): string {
+  if (!val) return '';
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString();
+  } catch { return ''; }
+}
+
 export default function HomepageManager() {
   const [items, setItems] = useState<HomepageContent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,9 +95,9 @@ export default function HomepageManager() {
       isActive: item.isActive,
       order: item.order,
       countdownEnabled: item.countdownEnabled || false,
-      countdownEndTime: item.countdownEndTime || '',
-      visibleFrom: item.visibleFrom || '',
-      visibleUntil: item.visibleUntil || '',
+      countdownEndTime: isoToLocal(item.countdownEndTime || ''),
+      visibleFrom: isoToLocal(item.visibleFrom || ''),
+      visibleUntil: isoToLocal(item.visibleUntil || ''),
     });
     setShowForm(true);
   };
@@ -84,7 +105,15 @@ export default function HomepageManager() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = { ...form, order: Number(form.order) };
+      // Sanitize date fields: convert local datetime to ISO, skip invalid
+      const payload = {
+        ...form,
+        order: Number(form.order),
+        countdownEndTime: localToIso(form.countdownEndTime || ''),
+        visibleFrom: localToIso(form.visibleFrom || ''),
+        visibleUntil: localToIso(form.visibleUntil || ''),
+        countdownEnabled: (form.type === 'countdown' || form.type === 'seasonal') && !!form.countdownEndTime,
+      };
       if (editing) {
         await updateDoc(doc(db, 'homepageContent', editing.id), payload);
       } else {
@@ -303,8 +332,8 @@ export default function HomepageManager() {
                       type="datetime-local"
                       required
                       className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
-                      value={form.countdownEndTime ? form.countdownEndTime.slice(0, 16) : ''}
-                      onChange={e => setForm(f => ({ ...f, countdownEndTime: new Date(e.target.value).toISOString(), countdownEnabled: true }))}
+                      value={form.countdownEndTime || ''}
+                      onChange={e => setForm(f => ({ ...f, countdownEndTime: e.target.value }))}
                     />
                     <p className="text-[10px] text-gray-400 mt-1">Timer auto-hides when this time is reached. Set a future date.</p>
                   </div>
@@ -316,8 +345,8 @@ export default function HomepageManager() {
                   <input
                     type="datetime-local"
                     className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
-                    value={form.visibleFrom ? form.visibleFrom.slice(0, 16) : ''}
-                    onChange={e => setForm(f => ({ ...f, visibleFrom: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+                    value={form.visibleFrom || ''}
+                    onChange={e => setForm(f => ({ ...f, visibleFrom: e.target.value }))}
                   />
                   <p className="text-[10px] text-gray-400 mt-1">Leave empty = visible immediately</p>
                 </div>
@@ -326,8 +355,8 @@ export default function HomepageManager() {
                   <input
                     type="datetime-local"
                     className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
-                    value={form.visibleUntil ? form.visibleUntil.slice(0, 16) : ''}
-                    onChange={e => setForm(f => ({ ...f, visibleUntil: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+                    value={form.visibleUntil || ''}
+                    onChange={e => setForm(f => ({ ...f, visibleUntil: e.target.value }))}
                   />
                   <p className="text-[10px] text-gray-400 mt-1">Leave empty = visible forever</p>
                 </div>

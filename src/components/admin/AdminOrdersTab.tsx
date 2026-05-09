@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown } from 'lucide-react';
 import { Order, User, BulkBooking } from '../../types';
 import { db } from '../../firebase';
-import { downloadInvoice } from '../../lib/invoiceGenerator';
+import { downloadInvoice, resolveCustomerName } from '../../lib/invoiceGenerator';
 import { collection, query, onSnapshot, orderBy, doc, updateDoc, runTransaction } from 'firebase/firestore';
 
 interface AdminOrdersTabProps {
@@ -157,6 +157,14 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
 }) {
   const isUnderReview = order.paymentMethod === 'qr' && order.paymentStatus === 'under_review';
 
+  // Pre-fetch customer name on mount so download stays synchronous
+  const [cachedName, setCachedName] = useState<string>((order as any).customerName || 'Customer');
+  useEffect(() => {
+    if (!(order as any).customerName && order.userId) {
+      resolveCustomerName(order).then(setCachedName);
+    }
+  }, [order.id]);
+
   return (
     <div className={`bg-white p-4 rounded-2xl border shadow-sm hover:shadow-md transition-all ${
       isUnderReview ? 'border-orange-200 ring-2 ring-orange-100' : `border-${accentColor}-100`
@@ -231,7 +239,7 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
       </select>
       {order.status === 'Delivered' && (
         <button
-          onClick={() => downloadInvoice(order, (order as any).customerName)}
+          onClick={() => downloadInvoice(order, cachedName)}
           className="w-full mt-2 flex items-center justify-center gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white py-2 rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-sm hover:shadow-md active:scale-[0.98] transition-all"
         >
           <FileDown className="w-3.5 h-3.5" />

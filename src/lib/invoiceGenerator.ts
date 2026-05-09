@@ -374,23 +374,27 @@ export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
   return doc;
 }
 
-// ─── Download Helper ─────────────────────────────────────────────────────────
-export async function downloadInvoice(order: Order, customerName?: string) {
-  try {
-    // Resolve customer name: order field → param → Firestore lookup → fallback
-    let resolvedName = (order as any).customerName || customerName || '';
-    if (!resolvedName && order.userId) {
-      try {
-        const userSnap = await getDoc(fbDoc(db, 'users', order.userId));
-        resolvedName = userSnap.exists() ? (userSnap.data().name || '') : '';
-      } catch { /* ignore fetch errors */ }
-    }
+// ─── Customer Name Resolver (async — call BEFORE download) ───────────────────
+export async function resolveCustomerName(order: Order, fallbackName?: string): Promise<string> {
+  const name = (order as any).customerName || fallbackName || '';
+  if (name) return name;
+  // Fetch from Firestore for old orders without customerName
+  if (order.userId) {
+    try {
+      const userSnap = await getDoc(fbDoc(db, 'users', order.userId));
+      if (userSnap.exists()) return userSnap.data().name || 'Customer';
+    } catch { /* ignore */ }
+  }
+  return 'Customer';
+}
 
-    const pdfDoc = generateInvoicePDF(order, resolvedName || 'Customer');
+// ─── Download Helper (SYNCHRONOUS — must stay sync for browser download) ─────
+export function downloadInvoice(order: Order, customerName?: string) {
+  try {
+    const name = (order as any).customerName || customerName || 'Customer';
+    const pdfDoc = generateInvoicePDF(order, name);
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
-
-    // Use jsPDF's native save — triggers proper browser download with correct filename
     pdfDoc.save(filename);
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);

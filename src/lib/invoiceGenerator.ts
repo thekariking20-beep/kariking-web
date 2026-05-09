@@ -390,14 +390,8 @@ export async function downloadInvoice(order: Order, customerName?: string) {
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
 
-    // Create blob URL and open in browser's native PDF viewer.
-    // This avoids the Edge bug where data URIs in iframes trigger UUID downloads.
-    const blob = pdfDoc.output('blob');
-    const blobUrl = URL.createObjectURL(blob);
-    window.open(blobUrl, '_blank');
-
-    // Revoke after a delay to allow the new tab to load
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    // Use jsPDF's native save — triggers proper browser download with correct filename
+    pdfDoc.save(filename);
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);
     alert('Failed to generate invoice. Please try again.');

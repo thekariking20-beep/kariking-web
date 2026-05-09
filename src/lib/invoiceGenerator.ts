@@ -1,5 +1,9 @@
 import jsPDF from 'jspdf';
 import { Order } from '../types';
+import { STORE_CONFIG } from '../config/storeConfig';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const COIN_VALUE = 20;
 
 // ─── Invoice ID Generator ────────────────────────────────────────────────────
 function generateInvoiceId(orderId: string): string {
@@ -11,11 +15,16 @@ function generateInvoiceId(orderId: string): string {
 }
 
 // ─── Format Helpers ──────────────────────────────────────────────────────────
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
-    day: '2-digit', month: 'short', year: 'numeric',
-    hour: '2-digit', minute: '2-digit'
-  });
+function formatDate(dateStr: string | undefined): string {
+  if (!dateStr) return '—';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-IN', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch {
+    return '—';
+  }
 }
 
 function formatQty(qty: number, unit?: string): string {
@@ -29,228 +38,335 @@ function formatQty(qty: number, unit?: string): string {
   return `${qty}`;
 }
 
-const COIN_VALUE = 20;
+/** Format amount as ₹X,XXX for PDF (jsPDF handles ₹ via Unicode) */
+function fmtAmt(amount: number | undefined | null): string {
+  const safe = typeof amount === 'number' && isFinite(amount) ? Math.round(amount) : 0;
+  // Use Intl for comma grouping (1,299 etc.)
+  return '\u20B9' + new Intl.NumberFormat('en-IN').format(safe);
+}
+
+// ─── Page overflow guard ─────────────────────────────────────────────────────
+function checkPage(doc: jsPDF, y: number, margin: number, needed = 30): number {
+  const pageH = doc.internal.pageSize.getHeight();
+  if (y + needed > pageH - 20) {
+    doc.addPage();
+    return margin;
+  }
+  return y;
+}
 
 // ─── Main PDF Generator ─────────────────────────────────────────────────────
 export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const invoiceId = generateInvoiceId(order.id);
-  const margin = 20;
-  let y = 20;
+  const margin = 18;
+  let y = 0;
 
-  // ─── Color Constants ──────────────────────────────────────────────────
+  // ─── Color Palette ────────────────────────────────────────────────────
   const brandRed: [number, number, number] = [122, 0, 0];
   const darkText: [number, number, number] = [30, 30, 30];
   const grayText: [number, number, number] = [120, 120, 120];
   const lightGray: [number, number, number] = [245, 245, 245];
   const white: [number, number, number] = [255, 255, 255];
+  const greenText: [number, number, number] = [22, 163, 74];
 
   // ═══════════════════════════════════════════════════════════════════════
   // HEADER — Brand Bar
   // ═══════════════════════════════════════════════════════════════════════
   doc.setFillColor(...brandRed);
-  doc.rect(0, 0, pageWidth, 35, 'F');
+  doc.rect(0, 0, pageWidth, 32, 'F');
 
   doc.setTextColor(...white);
-  doc.setFontSize(22);
+  doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('KARI KING', margin, 16);
+  doc.text(STORE_CONFIG.name.toUpperCase(), margin, 14);
 
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text('Premium Fresh Meat Delivery', margin, 23);
+  doc.text(STORE_CONFIG.tagline, margin, 21);
 
   // Invoice title — right side
-  doc.setFontSize(14);
+  doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
-  doc.text('TAX INVOICE', pageWidth - margin, 16, { align: 'right' });
+  doc.text('TAX INVOICE', pageWidth - margin, 14, { align: 'right' });
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text(`#${invoiceId}`, pageWidth - margin, 23, { align: 'right' });
+  doc.text(`#${invoiceId}`, pageWidth - margin, 21, { align: 'right' });
 
-  y = 45;
+  y = 40;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // INVOICE META — Two columns
+  // FROM / TO — Two columns
   // ═══════════════════════════════════════════════════════════════════════
   const col1 = margin;
-  const col2 = pageWidth / 2 + 10;
+  const col2 = pageWidth / 2 + 8;
 
-  // Left column — Invoice details
+  // ─── FROM (Store details) ─────────────────────────────────────────────
   doc.setTextColor(...grayText);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.text('INVOICE DATE', col1, y);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.text('FROM', col1, y);
+  y += 5;
+
   doc.setTextColor(...darkText);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(formatDate(order.deliveredAt || order.updatedAt || order.createdAt), col1, y + 5);
+  doc.text(STORE_CONFIG.name, col1, y);
+  y += 5;
 
-  doc.setTextColor(...grayText);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text('ORDER ID', col1, y + 14);
+  doc.setTextColor(...grayText);
+  doc.text(STORE_CONFIG.address, col1, y);
+  y += 4;
+  doc.text(`${STORE_CONFIG.area}, ${STORE_CONFIG.city}, ${STORE_CONFIG.state} — ${STORE_CONFIG.pincode}`, col1, y);
+  y += 4;
+  doc.text(`Phone: ${STORE_CONFIG.phone}`, col1, y);
+  y += 4;
+  doc.text(`Email: ${STORE_CONFIG.email}`, col1, y);
+  if (STORE_CONFIG.gst) {
+    y += 4;
+    doc.text(`GSTIN: ${STORE_CONFIG.gst}`, col1, y);
+  }
+
+  // ─── TO (Customer details) ────────────────────────────────────────────
+  let ty = 40;
+  doc.setTextColor(...grayText);
+  doc.setFontSize(7);
+  doc.setFont('helvetica', 'bold');
+  doc.text('BILL TO', col2, ty);
+  ty += 5;
+
   doc.setTextColor(...darkText);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(`#${order.id.slice(-8).toUpperCase()}`, col1, y + 19);
+  // Use customerName from order data, then param, then fallback
+  const name = (order as any).customerName || customerName || 'Customer';
+  doc.text(name, col2, ty);
+  ty += 5;
 
-  // Payment method
-  doc.setTextColor(...grayText);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text('PAYMENT METHOD', col1, y + 28);
-  doc.setTextColor(...darkText);
-  doc.setFontSize(10);
+  doc.setTextColor(...grayText);
+  if (order.phone) {
+    doc.text(`Phone: ${order.phone}`, col2, ty);
+    ty += 4;
+  }
+
+  // Wrap delivery address
+  if (order.address) {
+    const addressLines = doc.splitTextToSize(order.address, pageWidth / 2 - margin - 5);
+    doc.text(addressLines, col2, ty);
+    ty += addressLines.length * 4;
+  }
+
+  y = Math.max(y, ty) + 4;
+
+  // ─── Invoice Meta Row ─────────────────────────────────────────────────
+  doc.setFillColor(248, 248, 248);
+  doc.rect(margin, y, pageWidth - margin * 2, 14, 'F');
+
+  doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...grayText);
+
+  const metaY = y + 5;
+  doc.text('INVOICE DATE', col1 + 3, metaY);
+  doc.text('ORDER ID', col1 + 55, metaY);
+  doc.text('PAYMENT', col1 + 110, metaY);
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...darkText);
+
+  const metaVY = y + 10;
+  doc.text(formatDate(order.deliveredAt || order.updatedAt || order.createdAt), col1 + 3, metaVY);
+  doc.text(`#${order.id.slice(-8).toUpperCase()}`, col1 + 55, metaVY);
+
   const paymentLabels: Record<string, string> = {
     qr: 'UPI QR Payment',
     coins: 'Kari Coins',
   };
-  doc.text(paymentLabels[order.paymentMethod] || order.paymentMethod, col1, y + 33);
+  doc.text(paymentLabels[order.paymentMethod] || order.paymentMethod, col1 + 110, metaVY);
 
-  // Right column — Customer details
-  doc.setTextColor(...grayText);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.text('BILLED TO', col2, y);
-  doc.setTextColor(...darkText);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text(customerName || 'Customer', col2, y + 5);
+  y += 20;
 
-  doc.setTextColor(...grayText);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.text(order.phone, col2, y + 11);
+  // ═══════════════════════════════════════════════════════════════════════
+  // UPI PAYMENT VERIFICATION BANNER (if applicable)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (order.paymentMethod === 'qr') {
+    const isPaid = order.paymentStatus === 'paid' || order.paymentStatus === 'confirmed';
 
-  // Wrap address
-  const addressLines = doc.splitTextToSize(order.address, pageWidth / 2 - margin - 5);
-  doc.text(addressLines, col2, y + 17);
+    doc.setFillColor(isPaid ? 240 : 255, isPaid ? 253 : 247, isPaid ? 244 : 237);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, isPaid && order.utrNumber ? 16 : 10, 2, 2, 'F');
 
-  y = y + 43;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
 
-  // ─── Divider ──────────────────────────────────────────────────────────
-  doc.setDrawColor(230, 230, 230);
-  doc.setLineWidth(0.5);
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 8;
+    if (isPaid) {
+      doc.setTextColor(22, 163, 74);
+      doc.text('\u2713 PAYMENT VERIFIED', col1 + 3, y + 5);
+      if (order.utrNumber) {
+        doc.setTextColor(...grayText);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`UTR: ${order.utrNumber}`, col1 + 3, y + 10);
+        if (order.verifiedAt) {
+          doc.text(`Verified: ${formatDate(order.verifiedAt)}`, col1 + 80, y + 10);
+        }
+      }
+    } else {
+      doc.setTextColor(220, 120, 0);
+      doc.text(`PAYMENT STATUS: ${(order.paymentStatus || 'pending').toUpperCase()}`, col1 + 3, y + 5);
+    }
+
+    y += (isPaid && order.utrNumber ? 20 : 14);
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // ITEMS TABLE
   // ═══════════════════════════════════════════════════════════════════════
 
   // Table header
-  doc.setFillColor(...lightGray);
-  doc.rect(margin, y - 3, pageWidth - margin * 2, 8, 'F');
-  doc.setTextColor(...grayText);
+  doc.setFillColor(...brandRed);
+  doc.rect(margin, y, pageWidth - margin * 2, 8, 'F');
+  doc.setTextColor(...white);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text('ITEM', margin + 3, y + 2);
-  doc.text('QTY', margin + 100, y + 2);
-  doc.text('RATE', margin + 120, y + 2);
-  doc.text('AMOUNT', pageWidth - margin - 3, y + 2, { align: 'right' });
+  doc.text('#', margin + 3, y + 5);
+  doc.text('ITEM', margin + 10, y + 5);
+  doc.text('QTY', margin + 95, y + 5);
+  doc.text('RATE', margin + 115, y + 5);
+  doc.text('AMOUNT', pageWidth - margin - 3, y + 5, { align: 'right' });
 
-  y += 10;
+  y += 12;
 
   // Table rows
   doc.setTextColor(...darkText);
   order.items.forEach((item, idx) => {
+    y = checkPage(doc, y, 45);
+
     const itemTotal = Math.round((item.quantity / (item.baseWeight || 1)) * item.sellingPrice);
 
+    // Alternate row background
+    if (idx % 2 === 0) {
+      doc.setFillColor(252, 252, 252);
+      doc.rect(margin, y - 4, pageWidth - margin * 2, 9, 'F');
+    }
+
+    doc.setTextColor(...grayText);
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${idx + 1}`, margin + 3, y);
+
+    doc.setTextColor(...darkText);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text(item.name, margin + 3, y);
-    
+    // Truncate long names
+    const maxNameW = 78;
+    const itemName = doc.splitTextToSize(item.name, maxNameW)[0];
+    doc.text(itemName, margin + 10, y);
+
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.text(formatQty(item.quantity, item.unitType), margin + 100, y);
-    doc.text(`₹${item.sellingPrice}`, margin + 120, y);
-    
+    doc.setTextColor(...grayText);
+    doc.text(formatQty(item.quantity, item.unitType), margin + 95, y);
+    doc.text(fmtAmt(item.sellingPrice), margin + 115, y);
+
     doc.setFont('helvetica', 'bold');
-    doc.text(`₹${itemTotal}`, pageWidth - margin - 3, y, { align: 'right' });
+    doc.setTextColor(...darkText);
+    doc.text(fmtAmt(itemTotal), pageWidth - margin - 3, y, { align: 'right' });
 
-    y += 7;
-
-    // Light row separator
-    if (idx < order.items.length - 1) {
-      doc.setDrawColor(240, 240, 240);
-      doc.setLineWidth(0.2);
-      doc.line(margin + 3, y - 2, pageWidth - margin - 3, y - 2);
-    }
+    y += 8;
   });
 
-  y += 5;
-
-  // ─── Divider ──────────────────────────────────────────────────────────
-  doc.setDrawColor(200, 200, 200);
-  doc.setLineWidth(0.5);
-  doc.line(margin + 95, y - 3, pageWidth - margin, y - 3);
+  y += 4;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // PRICING SUMMARY — Right aligned
+  // PRICING SUMMARY
   // ═══════════════════════════════════════════════════════════════════════
-  const summaryX = margin + 105;
-  const summaryValX = pageWidth - margin - 3;
+  y = checkPage(doc, y, 50);
 
+  // Divider
+  doc.setDrawColor(220, 220, 220);
+  doc.setLineWidth(0.3);
+  doc.line(margin + 90, y - 2, pageWidth - margin, y - 2);
+
+  const sumLabelX = margin + 95;
+  const sumValX = pageWidth - margin - 3;
+
+  // Subtotal
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...grayText);
-  doc.text('Subtotal', summaryX, y);
+  doc.text('Subtotal', sumLabelX, y + 2);
   doc.setTextColor(...darkText);
-  doc.text(`₹${Math.round(order.totalAmount)}`, summaryValX, y, { align: 'right' });
-  y += 6;
+  doc.text(fmtAmt(order.totalAmount), sumValX, y + 2, { align: 'right' });
+  y += 7;
 
-  if (order.coinsUsed > 0) {
+  // Coupon Discount
+  if (order.couponDiscount && order.couponDiscount > 0) {
     doc.setTextColor(...grayText);
-    doc.text(`Coin Discount (${order.coinsUsed} coins)`, summaryX, y);
-    doc.setTextColor(22, 163, 74); // green
-    doc.text(`-₹${order.coinsUsed * COIN_VALUE}`, summaryValX, y, { align: 'right' });
+    doc.text(`Coupon${order.couponCode ? ` (${order.couponCode})` : ''}`, sumLabelX, y);
+    doc.setTextColor(...greenText);
+    doc.text(`-${fmtAmt(order.couponDiscount)}`, sumValX, y, { align: 'right' });
     y += 6;
   }
 
+  // Coin Discount
+  if (order.coinsUsed > 0) {
+    doc.setTextColor(...grayText);
+    doc.text(`Kari Coins (${order.coinsUsed} coins)`, sumLabelX, y);
+    doc.setTextColor(...greenText);
+    doc.text(`-${fmtAmt(order.coinsUsed * COIN_VALUE)}`, sumValX, y, { align: 'right' });
+    y += 6;
+  }
+
+  // Delivery Charge
   const deliveryCharge = order.deliveryCharge ?? 0;
   doc.setTextColor(...grayText);
-  doc.text('Delivery Charge', summaryX, y);
+  doc.text('Delivery', sumLabelX, y);
   doc.setTextColor(...darkText);
-  doc.text(deliveryCharge === 0 ? 'FREE' : `₹${deliveryCharge}`, summaryValX, y, { align: 'right' });
-  y += 4;
+  doc.text(deliveryCharge === 0 ? 'FREE' : fmtAmt(deliveryCharge), sumValX, y, { align: 'right' });
+  y += 5;
 
-  // Total line
+  // ─── Grand Total Box ──────────────────────────────────────────────────
   doc.setDrawColor(200, 200, 200);
   doc.setLineWidth(0.3);
-  doc.line(summaryX, y, pageWidth - margin, y);
-  y += 6;
+  doc.line(sumLabelX, y, pageWidth - margin, y);
+  y += 5;
 
-  // Grand Total
   doc.setFillColor(...brandRed);
-  doc.roundedRect(summaryX - 5, y - 5, pageWidth - margin - summaryX + 8, 12, 2, 2, 'F');
+  doc.roundedRect(sumLabelX - 5, y - 4, pageWidth - margin - sumLabelX + 8, 13, 2, 2, 'F');
   doc.setTextColor(...white);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
-  doc.text('TOTAL PAID', summaryX, y + 3);
-  doc.text(`₹${order.finalAmount || Math.round(order.totalAmount)}`, summaryValX, y + 3, { align: 'right' });
+  doc.text('TOTAL PAID', sumLabelX, y + 4);
+  doc.text(fmtAmt(order.finalAmount || Math.round(order.totalAmount)), sumValX, y + 4, { align: 'right' });
 
-  y += 20;
+  y += 22;
 
   // ═══════════════════════════════════════════════════════════════════════
   // FOOTER
   // ═══════════════════════════════════════════════════════════════════════
+  y = checkPage(doc, y, 30);
+
   doc.setDrawColor(230, 230, 230);
   doc.setLineWidth(0.3);
   doc.line(margin, y, pageWidth - margin, y);
-  y += 8;
+  y += 7;
 
   doc.setTextColor(...grayText);
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', 'bold');
   doc.text('Thank you for shopping with Kari King!', pageWidth / 2, y, { align: 'center' });
   y += 5;
+
   doc.setFontSize(7);
+  doc.setFont('helvetica', 'normal');
   doc.text('This is a computer-generated invoice and does not require a signature.', pageWidth / 2, y, { align: 'center' });
   y += 4;
-  doc.text('For queries, call: +91 6380886374 | www.kariking.in', pageWidth / 2, y, { align: 'center' });
+  doc.text(`For queries: ${STORE_CONFIG.phone} | ${STORE_CONFIG.email} | ${STORE_CONFIG.website}`, pageWidth / 2, y, { align: 'center' });
 
   return doc;
 }

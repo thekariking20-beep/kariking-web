@@ -231,7 +231,7 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
       </select>
       {order.status === 'Delivered' && (
         <button
-          onClick={() => downloadInvoice(order)}
+          onClick={() => downloadInvoice(order, (order as any).customerName)}
           className="w-full mt-2 flex items-center justify-center gap-1.5 bg-gradient-to-r from-green-600 to-emerald-600 text-white py-2 rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-sm hover:shadow-md active:scale-[0.98] transition-all"
         >
           <FileDown className="w-3.5 h-3.5" />

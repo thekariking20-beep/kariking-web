@@ -119,3 +119,37 @@ body {
   }
 }
 
+/* ── Print Styles for Invoice ───────────────────────────────────── */
+@media print {
+  /* Reset to white background */
+  body {
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide non-printable elements */
+  nav, footer, .bottom-nav, .admin-sidebar,
+  [data-no-print], button:not(.print-keep) {
+    display: none !important;
+  }
+
+  /* Clean page margins */
+  @page {
+    margin: 10mm;
+    size: A4;
+  }
+
+  /* Prevent breaks inside cards */
+  .premium-card, table, tr {
+    page-break-inside: avoid;
+  }
+
+  /* Remove shadows and transitions */
+  * {
+    box-shadow: none !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}

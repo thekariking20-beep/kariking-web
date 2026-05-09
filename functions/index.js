@@ -442,6 +442,13 @@ exports.createOrder = onCall(async (request) => {
   const finalAmount = Math.max(0, totalPrice - discountAmount) + (deliveryFee || 0);
   const now = new Date().toISOString();
 
+  // Fetch customer name for invoice
+  let customerName = '';
+  try {
+    const custDoc = await db.doc(`users/${userId}`).get();
+    customerName = custDoc.exists ? (custDoc.data().name || '') : '';
+  } catch (e) { console.warn('Could not fetch customer name:', e); }
+
   // ─── Status Machine ─────────────────────────────────────────────────────
   let paymentStatus = 'pending';
   if (paymentMethod === 'coins' && finalAmount <= 0) {
@@ -452,6 +459,7 @@ exports.createOrder = onCall(async (request) => {
 
   const orderData = {
     userId,
+    customerName,
     items: validatedItems,
     totalAmount: totalPrice,
     finalAmount: Math.max(0, finalAmount),

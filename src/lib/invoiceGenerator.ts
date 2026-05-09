@@ -41,8 +41,9 @@ function formatQty(qty: number, unit?: string): string {
 /** Format amount as ₹X,XXX for PDF (jsPDF handles ₹ via Unicode) */
 function fmtAmt(amount: number | undefined | null): string {
   const safe = typeof amount === 'number' && isFinite(amount) ? Math.round(amount) : 0;
-  // Use Intl for comma grouping (1,299 etc.)
-  return '\u20B9' + new Intl.NumberFormat('en-IN').format(safe);
+  // jsPDF default fonts (Helvetica) do NOT support Unicode ₹ (U+20B9).
+  // Use 'Rs.' prefix which is universally safe in PDF encoding.
+  return 'Rs.' + new Intl.NumberFormat('en-IN').format(safe);
 }
 
 // ─── Page overflow guard ─────────────────────────────────────────────────────
@@ -206,7 +207,7 @@ export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
 
     if (isPaid) {
       doc.setTextColor(22, 163, 74);
-      doc.text('\u2713 PAYMENT VERIFIED', col1 + 3, y + 5);
+      doc.text('PAYMENT VERIFIED', col1 + 3, y + 5);
       if (order.utrNumber) {
         doc.setTextColor(...grayText);
         doc.setFont('helvetica', 'normal');
@@ -373,7 +374,12 @@ export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
 
 // ─── Download Helper ─────────────────────────────────────────────────────────
 export function downloadInvoice(order: Order, customerName?: string) {
-  const doc = generateInvoicePDF(order, customerName);
-  const invoiceId = generateInvoiceId(order.id);
-  doc.save(`Kari_King_Invoice_${invoiceId}.pdf`);
+  try {
+    const doc = generateInvoicePDF(order, customerName);
+    const invoiceId = generateInvoiceId(order.id);
+    doc.save(`Kari_King_Invoice_${invoiceId}.pdf`);
+  } catch (err) {
+    console.error('[Invoice] PDF generation failed:', err);
+    alert('Failed to generate invoice. Please try again.');
+  }
 }

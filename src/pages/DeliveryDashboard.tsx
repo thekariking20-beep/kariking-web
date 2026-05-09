@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import {
   collection, query, where, orderBy, onSnapshot, limit,
   doc, updateDoc, getDoc, setDoc
+} from 'firebase/firestore';
+import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
 import { processReferralReward } from '../lib/referralReward';

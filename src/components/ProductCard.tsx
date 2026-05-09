@@ -76,9 +76,10 @@ export default function ProductCard({ product }: ProductCardProps) {
           </div>
         ) : product.discountPercentage ? (
           <div 
-            className="absolute top-1.5 left-1.5 text-white text-[8px] font-black uppercase tracking-wide px-2 py-[3px] rounded-md shadow-md"
+            className="absolute top-2 left-2 text-white text-[13px] font-black uppercase tracking-wider px-3 py-1 rounded-lg shadow-lg"
             style={{
               background: 'linear-gradient(135deg, #EF4444 0%, #B91C1C 100%)',
+              boxShadow: '0 4px 12px rgba(239,68,68,0.45)',
             }}
           >
             {product.discountPercentage}% OFF
@@ -120,7 +121,7 @@ export default function ProductCard({ product }: ProductCardProps) {
             ) : (
               <div className="flex items-end justify-between gap-1 w-full">
                 <div className="min-w-0">
-                  <span className="text-base sm:text-lg font-black text-gray-900 leading-none block">
+                  <span className="text-lg sm:text-xl font-black text-gray-900 leading-none block">
                     ₹{product.sellingPrice}
                   </span>
                   {hasDiscount && (

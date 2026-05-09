@@ -1,6 +1,8 @@
 import jsPDF from 'jspdf';
 import { Order } from '../types';
 import { STORE_CONFIG } from '../config/storeConfig';
+import { doc as fbDoc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const COIN_VALUE = 20;
@@ -373,15 +375,24 @@ export function generateInvoicePDF(order: Order, customerName?: string): jsPDF {
 }
 
 // ─── Download Helper ─────────────────────────────────────────────────────────
-export function downloadInvoice(order: Order, customerName?: string) {
+export async function downloadInvoice(order: Order, customerName?: string) {
   try {
-    const doc = generateInvoicePDF(order, customerName);
+    // Resolve customer name: order field → param → Firestore lookup → fallback
+    let resolvedName = (order as any).customerName || customerName || '';
+    if (!resolvedName && order.userId) {
+      try {
+        const userSnap = await getDoc(fbDoc(db, 'users', order.userId));
+        resolvedName = userSnap.exists() ? (userSnap.data().name || '') : '';
+      } catch { /* ignore fetch errors */ }
+    }
+
+    const pdfDoc = generateInvoicePDF(order, resolvedName || 'Customer');
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
 
     // Generate the PDF as a data URI and open in new tab.
     // This is the most reliable approach across all browsers.
-    const pdfDataUri = doc.output('datauristring', { filename });
+    const pdfDataUri = pdfDoc.output('datauristring', { filename });
     const newWindow = window.open('');
     if (newWindow) {
       newWindow.document.write(
@@ -391,7 +402,7 @@ export function downloadInvoice(order: Order, customerName?: string) {
       newWindow.document.close();
     } else {
       // Fallback: direct blob download if popup blocked
-      const blob = doc.output('blob');
+      const blob = pdfDoc.output('blob');
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

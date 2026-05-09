@@ -390,27 +390,14 @@ export async function downloadInvoice(order: Order, customerName?: string) {
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
 
-    // Generate the PDF as a data URI and open in new tab.
-    // This is the most reliable approach across all browsers.
-    const pdfDataUri = pdfDoc.output('datauristring', { filename });
-    const newWindow = window.open('');
-    if (newWindow) {
-      newWindow.document.write(
-        `<html><head><title>${filename}</title></head>` +
-        `<body style="margin:0"><iframe src="${pdfDataUri}" style="width:100%;height:100%;border:none"></iframe></body></html>`
-      );
-      newWindow.document.close();
-    } else {
-      // Fallback: direct blob download if popup blocked
-      const blob = pdfDoc.output('blob');
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
-    }
+    // Create blob URL and open in browser's native PDF viewer.
+    // This avoids the Edge bug where data URIs in iframes trigger UUID downloads.
+    const blob = pdfDoc.output('blob');
+    const blobUrl = URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank');
+
+    // Revoke after a delay to allow the new tab to load
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);
     alert('Failed to generate invoice. Please try again.');

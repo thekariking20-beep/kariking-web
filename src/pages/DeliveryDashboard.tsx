@@ -62,49 +62,27 @@ export default function DeliveryDashboard() {
   useEffect(() => {
     if (!user || !isDelivery) return;
 
-    // 1. Active Orders (Order Received, Packed, Dispatched)
-    const activeQ = query(
+    // Single query to fetch ALL orders for this partner (avoids composite index requirement!)
+    // We then sort and filter them locally.
+    const ordersQ = query(
       collection(db, 'orders'),
-      where('deliveryPartnerId', '==', user.uid),
-      where('status', 'in', ['Order Received', 'Packed', 'Dispatched']),
-      orderBy('createdAt', 'desc'),
-      limit(50)
+      where('deliveryPartnerId', '==', user.uid)
     );
 
-    let activeList: Order[] = [];
-    let doneList: Order[] = [];
-
-    const unsub1 = onSnapshot(activeQ, snap => {
-      activeList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
-      mergeOrders();
-    }, err => { console.error('Active orders error:', err); setLoading(false); });
-
-    // 2. Done Orders (Delivered, Cancelled)
-    const doneQ = query(
-      collection(db, 'orders'),
-      where('deliveryPartnerId', '==', user.uid),
-      where('status', 'in', ['Delivered', 'Cancelled']),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    );
-
-    const unsub2 = onSnapshot(doneQ, snap => {
-      doneList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
-      mergeOrders();
-    }, err => { console.error('Done orders error:', err); setLoading(false); });
-
-    function mergeOrders() {
-      // Combine, deduplicate by id, sort by createdAt desc
-      const map = new Map<string, Order>();
-      [...activeList, ...doneList].forEach(o => map.set(o.id, o));
-      const merged = Array.from(map.values()).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      setAllOrders(merged);
+    const unsub = onSnapshot(ordersQ, snap => {
+      const orders = snap.docs.map(d => ({ id: d.id, ...d.data() } as Order));
+      
+      // Sort descending by createdAt
+      orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      
+      setAllOrders(orders);
       setLoading(false);
-    }
+    }, err => { 
+      console.error('Orders listener error:', err); 
+      setLoading(false); 
+    });
 
-    return () => { unsub1(); unsub2(); };
+    return () => unsub();
   }, [user, isDelivery]);
 
   // ─── Toggle online/offline ────────────────────────────────────────────────

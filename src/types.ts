@@ -243,7 +243,7 @@ export interface Order {
 
 export interface HomepageContent {
   id: string;
-  type: 'banner' | 'offer' | 'hero';
+  type: 'banner' | 'offer' | 'hero' | 'countdown' | 'seasonal';
   title: string;
   subtitle?: string;
   imageUrl?: string;
@@ -255,6 +255,14 @@ export interface HomepageContent {
   isActive: boolean;
   order: number;
   createdAt: string;
+
+  // Countdown timer
+  countdownEnabled?: boolean;
+  countdownEndTime?: string;   // ISO datetime string
+
+  // Scheduling
+  visibleFrom?: string;        // ISO datetime string
+  visibleUntil?: string;       // ISO datetime string
 }
 
 export interface SystemSettings {

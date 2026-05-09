@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { HomepageContent } from '../../types';
-import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, GripVertical, X, Check, Image as ImageIcon } from 'lucide-react';
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, GripVertical, X, Check, Image as ImageIcon, Clock, CalendarClock, Timer, Flame } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import ImageUploadDropzone from '../ImageUploadDropzone';
@@ -22,6 +22,10 @@ const EMPTY_FORM: Omit<HomepageContent, 'id' | 'createdAt'> = {
   badgeColor: 'bg-red-600',
   isActive: true,
   order: 0,
+  countdownEnabled: false,
+  countdownEndTime: '',
+  visibleFrom: '',
+  visibleUntil: '',
 };
 
 const BADGE_COLOR_OPTIONS = [
@@ -69,6 +73,10 @@ export default function HomepageManager() {
       badgeColor: item.badgeColor || 'bg-red-600',
       isActive: item.isActive,
       order: item.order,
+      countdownEnabled: item.countdownEnabled || false,
+      countdownEndTime: item.countdownEndTime || '',
+      visibleFrom: item.visibleFrom || '',
+      visibleUntil: item.visibleUntil || '',
     });
     setShowForm(true);
   };
@@ -104,6 +112,8 @@ export default function HomepageManager() {
     banner: 'bg-blue-100 text-blue-700',
     offer: 'bg-orange-100 text-orange-700',
     hero: 'bg-purple-100 text-purple-700',
+    countdown: 'bg-red-100 text-red-700',
+    seasonal: 'bg-emerald-100 text-emerald-700',
   };
 
   return (
@@ -151,6 +161,8 @@ export default function HomepageManager() {
                     <option value="banner">🖼️ Banner (Carousel Slide)</option>
                     <option value="offer">🎁 Offer / Coupon Card</option>
                     <option value="hero">🏠 Hero Section</option>
+                    <option value="countdown">⏱️ Countdown / Flash Sale</option>
+                    <option value="seasonal">🎄 Seasonal Campaign</option>
                   </select>
                 </div>
 
@@ -282,6 +294,43 @@ export default function HomepageManager() {
                     </div>
                   </div>
                 )}
+
+                {/* Countdown End Time (for countdown and seasonal types) */}
+                {(form.type === 'countdown' || form.type === 'seasonal') && (
+                  <div className="md:col-span-2">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">⏱️ Countdown End Time *</label>
+                    <input
+                      type="datetime-local"
+                      required
+                      className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
+                      value={form.countdownEndTime ? form.countdownEndTime.slice(0, 16) : ''}
+                      onChange={e => setForm(f => ({ ...f, countdownEndTime: new Date(e.target.value).toISOString(), countdownEnabled: true }))}
+                    />
+                    <p className="text-[10px] text-gray-400 mt-1">Timer auto-hides when this time is reached. Set a future date.</p>
+                  </div>
+                )}
+
+                {/* Scheduling */}
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">📅 Visible From</label>
+                  <input
+                    type="datetime-local"
+                    className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
+                    value={form.visibleFrom ? form.visibleFrom.slice(0, 16) : ''}
+                    onChange={e => setForm(f => ({ ...f, visibleFrom: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Leave empty = visible immediately</p>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 block">📅 Visible Until</label>
+                  <input
+                    type="datetime-local"
+                    className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 outline-none font-medium text-sm focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
+                    value={form.visibleUntil ? form.visibleUntil.slice(0, 16) : ''}
+                    onChange={e => setForm(f => ({ ...f, visibleUntil: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">Leave empty = visible forever</p>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 mt-6 pt-5 border-t border-gray-100">
@@ -343,6 +392,19 @@ export default function HomepageManager() {
                         {item.couponCode && (
                           <span className="text-[9px] font-black uppercase tracking-widest bg-orange-100 text-orange-700 px-2 py-0.5 rounded mt-0.5 inline-block">
                             {item.couponCode}
+                          </span>
+                        )}
+                        {item.countdownEndTime && (
+                          <span className="text-[9px] font-bold text-red-600 flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3" /> Ends: {new Date(item.countdownEndTime).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                        {(item.visibleFrom || item.visibleUntil) && (
+                          <span className="text-[9px] font-bold text-blue-600 flex items-center gap-1 mt-0.5">
+                            <CalendarClock className="w-3 h-3" />
+                            {item.visibleFrom ? `From: ${new Date(item.visibleFrom).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
+                            {item.visibleFrom && item.visibleUntil ? ' — ' : ''}
+                            {item.visibleUntil ? `Until: ${new Date(item.visibleUntil).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
                           </span>
                         )}
                       </div>

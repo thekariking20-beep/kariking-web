@@ -6,6 +6,7 @@ import ProductCard from '../components/ProductCard';
 import ProductGrid from '../components/ProductGrid';
 import BannerSlider from '../components/home/BannerSlider';
 import OffersRow from '../components/home/OffersRow';
+import CountdownStrip from '../components/home/CountdownStrip';
 import { motion } from 'motion/react';
 import { Star, Clock, ShieldCheck, ChevronRight, Flame, ArrowRight, ShoppingCart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -147,10 +148,37 @@ export default function Home() {
   }, []);
 
   // ─── Derived CMS slices ──────────────────────────────────────────────────────
-  const banners = useMemo(() => {
-    const fromCms = cmsContent.filter(c => c.type === 'banner');
-    return fromCms.length ? fromCms : DEFAULT_BANNERS;
+  // Schedule-aware: filter out items not yet visible or already expired
+  const visibleCms = useMemo(() => {
+    const now = Date.now();
+    return cmsContent.filter(c => {
+      if (c.visibleFrom && new Date(c.visibleFrom).getTime() > now) return false;
+      if (c.visibleUntil && new Date(c.visibleUntil).getTime() < now) return false;
+      return true;
+    });
   }, [cmsContent]);
+
+  const banners = useMemo(() => {
+    const fromCms = visibleCms.filter(c => c.type === 'banner');
+    return fromCms.length ? fromCms : DEFAULT_BANNERS;
+  }, [visibleCms]);
+
+  // Countdown campaigns (type: 'countdown' or seasonal with countdownEnabled)
+  const countdownCampaigns = useMemo(() => {
+    return visibleCms.filter(c => 
+      (c.type === 'countdown' || c.type === 'seasonal') && 
+      c.countdownEnabled && 
+      c.countdownEndTime
+    );
+  }, [visibleCms]);
+
+  // Seasonal campaigns (type: 'seasonal' without countdown, or with expired countdown)
+  const seasonalCampaigns = useMemo(() => {
+    return visibleCms.filter(c => 
+      c.type === 'seasonal' && 
+      (!c.countdownEnabled || !c.countdownEndTime)
+    );
+  }, [visibleCms]);
 
   // Convert Firestore coupons to OffersRow-compatible HomepageContent format
   const offers = useMemo(() => {
@@ -173,14 +201,11 @@ export default function Home() {
     }));
 
     // Also include CMS-managed offers (from homepageContent collection)
-    const cmsOffers = cmsContent.filter(c => c.type === 'offer');
+    const cmsOffers = visibleCms.filter(c => c.type === 'offer');
 
-    // Merge: Firestore coupons first, then CMS offers
-    const merged = [...couponOffers, ...cmsOffers];
-
-    // Fall back to hardcoded defaults ONLY if both are empty
-    return merged.length > 0 ? merged : DEFAULT_OFFERS;
-  }, [firestoreCoupons, cmsContent]);
+    // Always show: Firestore coupons + CMS offers + default promos
+    return [...couponOffers, ...cmsOffers, ...DEFAULT_OFFERS];
+  }, [firestoreCoupons, visibleCms]);
 
   // ─── Product grouping ────────────────────────────────────────────────────────
   // Smart resolve: if product is in "Others" but name/sub matches a known category, reroute it
@@ -270,6 +295,65 @@ export default function Home() {
           </motion.div>
         ))}
       </section>
+
+      {/* ─── COUNTDOWN CAMPAIGNS ──────────────────────────────────────────── */}
+      {countdownCampaigns.length > 0 && (
+        <CountdownStrip campaigns={countdownCampaigns} />
+      )}
+
+      {/* ─── SEASONAL CAMPAIGNS ──────────────────────────────────────────── */}
+      {seasonalCampaigns.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <div className="bg-emerald-100 p-2 rounded-xl">
+              <Flame className="w-4 h-4 text-emerald-600" />
+            </div>
+            <h2 className="text-xl font-black text-gray-900">Special Deals</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {seasonalCampaigns.map((item, idx) => {
+              const SEASONAL_GRADIENTS = [
+                'from-emerald-600 to-teal-500',
+                'from-violet-600 to-purple-500',
+                'from-amber-500 to-orange-500',
+                'from-rose-600 to-pink-500',
+              ];
+              const grad = SEASONAL_GRADIENTS[idx % SEASONAL_GRADIENTS.length];
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.06 }}
+                  className={`relative overflow-hidden rounded-2xl bg-gradient-to-br ${grad} p-5 sm:p-6 shadow-lg`}
+                >
+                  <div className="absolute -right-8 -top-8 w-32 h-32 rounded-full bg-white/10" />
+                  <div className="absolute -left-6 -bottom-10 w-28 h-28 rounded-full bg-white/5" />
+                  <div className="relative z-10">
+                    {item.badgeLabel && (
+                      <span className="text-[9px] font-black uppercase tracking-widest text-white/90 bg-white/20 px-2 py-0.5 rounded-full mb-2 inline-block">
+                        {item.badgeLabel}
+                      </span>
+                    )}
+                    <h3 className="text-white font-black text-lg leading-tight">{item.title}</h3>
+                    {item.subtitle && (
+                      <p className="text-white/70 text-xs mt-1 leading-relaxed max-w-sm">{item.subtitle}</p>
+                    )}
+                    {item.buttonText && (
+                      <Link
+                        to={item.redirectLink || '/products'}
+                        className="inline-flex items-center gap-1.5 mt-3 bg-white/20 hover:bg-white/30 border border-white/30 text-white text-xs font-black uppercase tracking-widest px-4 py-2 rounded-lg transition-colors"
+                      >
+                        {item.buttonText} <ChevronRight className="w-3 h-3" />
+                      </Link>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* ─── OFFERS & COUPONS ───────────────────────────────────────────────── */}
       {cmsLoading ? (

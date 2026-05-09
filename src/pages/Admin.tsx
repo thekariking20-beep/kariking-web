@@ -639,57 +639,22 @@ export default function Admin() {
                                 {/* Divider */}
                                 <hr className="border-gray-100" />
 
-                                {/* Pricing Section — Smart Unit Pricing */}
+                                {/* ─── PRICING SECTION ─── */}
                                 <div className="space-y-4">
                                   <div className="flex items-center justify-between">
-                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest">Smart Pricing</label>
-                                    {formData.mrpPrice > formData.sellingPrice && formData.mrpPrice > 0 && (
+                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest">Product Pricing</label>
+                                    {formData.mrpPrice > formData.sellingPrice && formData.mrpPrice > 0 && formData.sellingPrice > 0 && (
                                       <span className="text-[10px] font-black bg-green-100 text-green-700 px-2 py-1 rounded-lg uppercase tracking-wider">
-                                        Auto: {Math.round(((formData.mrpPrice - formData.sellingPrice) / formData.mrpPrice) * 100)}% OFF
+                                        {Math.round(((formData.mrpPrice - formData.sellingPrice) / formData.mrpPrice) * 100)}% OFF
                                       </span>
                                     )}
                                   </div>
-                                  
-                                  <p className="text-[11px] text-gray-400 -mt-2">Enter price per single unit. Total price auto-calculates from Unit Price × Base Quantity.</p>
 
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Unit Selling Price — PRIMARY INPUT */}
+                                    {/* Original Price (MRP) */}
                                     <div>
                                       <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
-                                        Unit Price (₹ per 1 {formData.unitType === 'gram' ? 'kg' : formData.unitType === 'piece' ? 'pc' : formData.unitType === 'litre' ? 'L' : 'kg'})
-                                      </label>
-                                      <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                                          <IndianRupee className="w-4 h-4 text-red-600" />
-                                        </div>
-                                        <input 
-                                          type="number" 
-                                          placeholder="e.g. 10 per egg, 220 per kg" 
-                                          required 
-                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-black text-lg text-gray-900" 
-                                          value={formData.baseWeight > 0 ? (Math.round((formData.sellingPrice / formData.baseWeight) * 100) / 100) || '' : formData.sellingPrice || ''} 
-                                          onChange={(e) => {
-                                            const unitPrice = Number(e.target.value);
-                                            const bw = formData.baseWeight || 1;
-                                            const newSelling = Math.round(unitPrice * bw * 100) / 100;
-                                            // Scale MRP proportionally if it exists
-                                            const currentUnitMrp = formData.mrpPrice > 0 && formData.sellingPrice > 0 
-                                              ? (formData.mrpPrice / formData.sellingPrice) * unitPrice 
-                                              : unitPrice;
-                                            setFormData({ 
-                                              ...formData, 
-                                              sellingPrice: newSelling,
-                                              mrpPrice: Math.round(currentUnitMrp * bw * 100) / 100
-                                            });
-                                          }} 
-                                        />
-                                      </div>
-                                    </div>
-                                    
-                                    {/* Unit MRP — OPTIONAL */}
-                                    <div>
-                                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
-                                        MRP per unit (optional, for discount)
+                                        Original Price / MRP (₹)
                                       </label>
                                       <div className="relative">
                                         <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -697,39 +662,77 @@ export default function Admin() {
                                         </div>
                                         <input 
                                           type="number" 
-                                          placeholder="MRP per unit (higher than selling)" 
-                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-medium line-through text-gray-500" 
-                                          value={formData.baseWeight > 0 ? (Math.round((formData.mrpPrice / formData.baseWeight) * 100) / 100) || '' : formData.mrpPrice || ''} 
+                                          placeholder="e.g. 500" 
+                                          required 
+                                          min="0"
+                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-black text-lg text-gray-900" 
+                                          value={formData.mrpPrice || ''} 
                                           onChange={(e) => {
-                                            const unitMrp = Number(e.target.value);
-                                            const bw = formData.baseWeight || 1;
-                                            setFormData({ ...formData, mrpPrice: Math.round(unitMrp * bw * 100) / 100 });
+                                            const mrp = Number(e.target.value) || 0;
+                                            setFormData({ 
+                                              ...formData, 
+                                              mrpPrice: mrp,
+                                              // Auto-sync selling price if it's empty or exceeds new MRP
+                                              sellingPrice: formData.sellingPrice === 0 || formData.sellingPrice > mrp ? mrp : formData.sellingPrice
+                                            });
+                                          }} 
+                                        />
+                                      </div>
+                                    </div>
+                                    
+                                    {/* Final Selling Price */}
+                                    <div>
+                                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1.5">
+                                        Final Selling Price (₹)
+                                      </label>
+                                      <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                          <IndianRupee className="w-4 h-4 text-red-600" />
+                                        </div>
+                                        <input 
+                                          type="number" 
+                                          placeholder="e.g. 400" 
+                                          required 
+                                          min="1"
+                                          className="w-full py-4 pr-4 pl-12 border border-gray-200 rounded-2xl bg-gray-50/50 focus:bg-white focus:ring-4 focus:ring-red-600/10 focus:border-red-600 transition-all outline-none font-black text-lg text-gray-900" 
+                                          value={formData.sellingPrice || ''} 
+                                          onChange={(e) => {
+                                            const sp = Number(e.target.value) || 0;
+                                            setFormData({ ...formData, sellingPrice: sp });
                                           }} 
                                         />
                                       </div>
                                     </div>
                                   </div>
 
-                                  {/* Auto-calculated total prices */}
-                                  {formData.sellingPrice > 0 && (
-                                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex items-center justify-between">
-                                      <div>
-                                        <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 mb-0.5">Auto-Calculated Total</p>
-                                        <p className="text-sm font-black text-emerald-900">
-                                          Selling: ₹{formData.sellingPrice}
-                                          {formData.mrpPrice > formData.sellingPrice && (
-                                            <span className="text-gray-400 font-medium line-through ml-2">MRP: ₹{formData.mrpPrice}</span>
-                                          )}
-                                        </p>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-[10px] text-emerald-600">for {formData.baseWeight} {formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</p>
-                                      </div>
-                                    </div>
-                                  )}
-                                  
+                                  {/* Inline Validation Error */}
                                   {formData.sellingPrice > formData.mrpPrice && formData.mrpPrice > 0 && (
-                                    <p className="text-xs font-semibold text-red-500 mt-1">⚠️ MRP per unit must be ≥ selling price per unit.</p>
+                                    <p className="text-xs font-semibold text-red-500 flex items-center gap-1">⚠️ Selling price must be less than or equal to MRP</p>
+                                  )}
+
+                                  {/* ─── LIVE PREVIEW CARD ─── */}
+                                  {formData.sellingPrice > 0 && formData.mrpPrice > 0 && (
+                                    <div className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-2xl p-4 space-y-3">
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">💡 Customer Preview</p>
+                                      <div className="flex items-baseline gap-2">
+                                        <span className="text-2xl font-black text-gray-900">₹{formData.sellingPrice}</span>
+                                        {formData.mrpPrice > formData.sellingPrice && (
+                                          <span className="text-sm text-gray-400 line-through font-medium">₹{formData.mrpPrice}</span>
+                                        )}
+                                        {formData.mrpPrice > formData.sellingPrice && (
+                                          <span className="text-[10px] font-black text-white px-2 py-0.5 rounded-md" style={{ background: 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)' }}>
+                                            {Math.round(((formData.mrpPrice - formData.sellingPrice) / formData.mrpPrice) * 100)}% OFF
+                                          </span>
+                                        )}
+                                      </div>
+                                      {formData.mrpPrice > formData.sellingPrice && (
+                                        <div className="flex items-center gap-4 text-xs">
+                                          <span className="text-emerald-700 font-bold bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg">
+                                            You Save: ₹{formData.mrpPrice - formData.sellingPrice}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
 
@@ -759,16 +762,7 @@ export default function Admin() {
                                           : ut === 'piece' ? { baseWeight: 1, minOrderQty: 1, stepSize: 1 }
                                           : ut === 'litre' ? { baseWeight: 1, minOrderQty: 1, stepSize: 1 }
                                           : { baseWeight: 1, minOrderQty: 1, stepSize: 1 };
-                                        // Preserve unit price when switching type
-                                        const oldBw = formData.baseWeight || 1;
-                                        const unitPrice = formData.sellingPrice / oldBw;
-                                        const unitMrp = formData.mrpPrice / oldBw;
-                                        const newBw = defaults.baseWeight;
-                                        setFormData({ 
-                                          ...formData, unitType: ut, ...defaults,
-                                          sellingPrice: Math.round(unitPrice * newBw * 100) / 100,
-                                          mrpPrice: Math.round(unitMrp * newBw * 100) / 100,
-                                        });
+                                        setFormData({ ...formData, unitType: ut, ...defaults });
                                       }}>
                                         <option value="gram">Gram (g) — Meats, Fish</option>
                                         <option value="kg">Kilogram (kg)</option>
@@ -783,17 +777,7 @@ export default function Admin() {
                                       <div className="flex bg-white rounded-xl overflow-hidden border border-gray-200 focus-within:ring-2 focus-within:ring-red-600/20 focus-within:border-red-600 transition-all">
                                         <input type="number" required placeholder={formData.unitType === 'gram' ? '1000' : '1'} className="w-full p-3 outline-none text-sm font-medium" value={formData.baseWeight} onChange={(e) => {
                                           const newBw = Number(e.target.value);
-                                          if (newBw <= 0) { setFormData({ ...formData, baseWeight: newBw }); return; }
-                                          // Preserve unit price when changing base weight
-                                          const oldBw = formData.baseWeight || 1;
-                                          const unitPrice = formData.sellingPrice / oldBw;
-                                          const unitMrp = formData.mrpPrice / oldBw;
-                                          setFormData({ 
-                                            ...formData, 
-                                            baseWeight: newBw,
-                                            sellingPrice: Math.round(unitPrice * newBw * 100) / 100,
-                                            mrpPrice: Math.round(unitMrp * newBw * 100) / 100,
-                                          });
+                                          setFormData({ ...formData, baseWeight: newBw });
                                         }} />
                                         <div className="px-3 bg-gray-50 flex items-center text-xs font-bold text-gray-400 border-l border-gray-200">{formData.unitType === 'gram' ? 'g' : formData.unitType === 'piece' ? 'pcs' : formData.unitType === 'litre' ? 'L' : 'kg'}</div>
                                       </div>
@@ -837,7 +821,7 @@ export default function Admin() {
                              </button>
                              <button 
                                type="submit" 
-                               disabled={!formData.image || (formData.sellingPrice > formData.mrpPrice) || formData.sellingPrice <= 0} 
+                               disabled={!formData.image || (formData.mrpPrice > 0 && formData.sellingPrice > formData.mrpPrice) || formData.sellingPrice <= 0 || formData.mrpPrice <= 0} 
                                className="w-full sm:w-auto min-w-[200px] px-8 py-4 sm:py-3 font-bold text-white rounded-2xl shadow-lg shadow-red-600/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:shadow-red-600/40 active:scale-[0.98] flex items-center justify-center gap-2"
                                style={{ background: 'linear-gradient(135deg, #8B0000 0%, #D9381E 100%)' }}
                               >
@@ -868,7 +852,9 @@ export default function Admin() {
                                 <div>
                                   <p className="font-bold text-gray-900 flex items-center gap-2">
                                     {product.name} 
-                                    <span className="text-xs text-gray-400 line-through font-normal">₹{product.mrpPrice}</span>
+                                    {product.mrpPrice > product.sellingPrice && (
+                                      <span className="text-xs text-gray-400 line-through font-normal">₹{product.mrpPrice}</span>
+                                    )}
                                     <span className="text-sm text-red-600">₹{product.sellingPrice}</span>
                                     {product.discountPercentage ? (
                                       <span className="text-[10px] font-black bg-red-100 text-red-700 px-1.5 py-0.5 rounded uppercase">{product.discountPercentage}% OFF</span>

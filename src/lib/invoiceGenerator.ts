@@ -379,22 +379,27 @@ export function downloadInvoice(order: Order, customerName?: string) {
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
 
-    // Use manual blob download — more reliable than doc.save() which
-    // some browsers block as a popup when not in a direct user-gesture chain.
-    const blob = doc.output('blob');
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-
-    // Cleanup
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 200);
+    // Generate the PDF as a data URI and open in new tab.
+    // This is the most reliable approach across all browsers.
+    const pdfDataUri = doc.output('datauristring', { filename });
+    const newWindow = window.open('');
+    if (newWindow) {
+      newWindow.document.write(
+        `<html><head><title>${filename}</title></head>` +
+        `<body style="margin:0"><iframe src="${pdfDataUri}" style="width:100%;height:100%;border:none"></iframe></body></html>`
+      );
+      newWindow.document.close();
+    } else {
+      // Fallback: direct blob download if popup blocked
+      const blob = doc.output('blob');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
+    }
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);
     alert('Failed to generate invoice. Please try again.');

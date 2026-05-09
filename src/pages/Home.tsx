@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { collection, query, onSnapshot, where, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Product, HomepageContent } from '../types';
+import { Product, HomepageContent, Coupon } from '../types';
 import ProductCard from '../components/ProductCard';
 import ProductGrid from '../components/ProductGrid';
 import BannerSlider from '../components/home/BannerSlider';
@@ -86,6 +86,7 @@ export default function Home() {
     } catch { return []; }
   });
   const [cmsContent, setCmsContent] = useState<HomepageContent[]>([]);
+  const [firestoreCoupons, setFirestoreCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(() => !sessionStorage.getItem('kk_products_cache'));
   const [cmsLoading, setCmsLoading] = useState(true);
   const [favorites, setFavorites] = useState<Product[]>([]);
@@ -117,16 +118,69 @@ export default function Home() {
     return () => unsub();
   }, []);
 
+  // ─── Real-time coupons listener ─────────────────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'coupons'),
+      where('isActive', '==', true),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, snap => {
+      const now = new Date();
+      const activeCoupons = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Coupon))
+        .filter(c => {
+          // Hide expired coupons
+          if (c.validTill) {
+            const expiry = new Date(c.validTill);
+            if (expiry < now) return false;
+          }
+          // Hide fully used coupons
+          if (c.totalUsageLimit > 0 && c.usedCount >= c.totalUsageLimit) return false;
+          return true;
+        });
+      setFirestoreCoupons(activeCoupons);
+    }, err => {
+      console.error('Coupons listener error:', err);
+    });
+    return () => unsub();
+  }, []);
+
   // ─── Derived CMS slices ──────────────────────────────────────────────────────
   const banners = useMemo(() => {
     const fromCms = cmsContent.filter(c => c.type === 'banner');
     return fromCms.length ? fromCms : DEFAULT_BANNERS;
   }, [cmsContent]);
 
+  // Convert Firestore coupons to OffersRow-compatible HomepageContent format
   const offers = useMemo(() => {
-    const fromCms = cmsContent.filter(c => c.type === 'offer');
-    return fromCms.length ? fromCms : DEFAULT_OFFERS;
-  }, [cmsContent]);
+    const BADGE_LABELS = ['🔥 Hot Deal', '💰 Save Big', '🎉 Special', '⭐ Limited', '🏷️ Offer'];
+
+    const couponOffers: HomepageContent[] = firestoreCoupons.map((c, idx) => ({
+      id: `coupon-${c.id}`,
+      type: 'offer' as const,
+      title: c.discountType === 'flat' 
+        ? `₹${c.discountValue} OFF` 
+        : `${c.discountValue}% OFF`,
+      subtitle: c.minOrder > 0 
+        ? `Use code at checkout • Min order ₹${c.minOrder}` 
+        : 'Use code at checkout',
+      couponCode: c.code,
+      badgeLabel: BADGE_LABELS[idx % BADGE_LABELS.length],
+      isActive: true,
+      order: idx,
+      createdAt: c.createdAt,
+    }));
+
+    // Also include CMS-managed offers (from homepageContent collection)
+    const cmsOffers = cmsContent.filter(c => c.type === 'offer');
+
+    // Merge: Firestore coupons first, then CMS offers
+    const merged = [...couponOffers, ...cmsOffers];
+
+    // Fall back to hardcoded defaults ONLY if both are empty
+    return merged.length > 0 ? merged : DEFAULT_OFFERS;
+  }, [firestoreCoupons, cmsContent]);
 
   // ─── Product grouping ────────────────────────────────────────────────────────
   // Smart resolve: if product is in "Others" but name/sub matches a known category, reroute it

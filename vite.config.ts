@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
             'vendor-ui-motion': ['motion'],
             'vendor-ui-icons': ['lucide-react'],
             'vendor-ui-charts': ['recharts'],
-            'vendor-utils': ['jspdf', 'html2canvas', 'qrcode']
+            'vendor-utils': ['qrcode']
           },
         },
       },

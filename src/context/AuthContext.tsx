@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, deleteDoc, increment, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, query, collection, where, getDocs, updateDoc, deleteDoc, increment, addDoc, onSnapshot, limit } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { User } from '../types';
 import { registerPushNotifications } from '../lib/notifications';
@@ -236,6 +236,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => unsubscribe();
   }, []);
+
+  // ─── Real-time User Doc Sync (coins, lockedCoins, etc.) ───────────────
+  // This ensures coin balances and referral rewards update instantly
+  // without requiring a page refresh.
+  useEffect(() => {
+    if (!firebaseUser || localStorage.getItem('DEMO_MODE') === 'true') return;
+
+    const userRef = doc(db, 'users', firebaseUser.uid);
+    const unsub = onSnapshot(userRef, (snap) => {
+      if (snap.exists()) {
+        setUser(snap.data() as User);
+      }
+    }, (err) => {
+      console.warn('User doc listener error:', err);
+    });
+
+    return () => unsub();
+  }, [firebaseUser]);
 
   const logout = async () => {
     localStorage.removeItem('hasSeenWelcome');

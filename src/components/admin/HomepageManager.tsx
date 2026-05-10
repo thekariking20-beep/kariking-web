@@ -64,6 +64,7 @@ export default function HomepageManager() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<HomepageContent | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'homepageContent'), orderBy('order', 'asc'));
@@ -127,14 +128,25 @@ export default function HomepageManager() {
   };
 
   const toggleActive = async (item: HomepageContent) => {
-    await updateDoc(doc(db, 'homepageContent', item.id), { isActive: !item.isActive });
-    // onSnapshot auto-updates
+    try {
+      await updateDoc(doc(db, 'homepageContent', item.id), { isActive: !item.isActive });
+    } catch (err: any) {
+      console.error('Toggle active failed:', err);
+      alert(`Failed to update: ${err.message || err}`);
+    }
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('Delete this content?')) return;
-    await deleteDoc(doc(db, 'homepageContent', id));
-    // onSnapshot auto-updates
+    if (!window.confirm('Delete this content? This cannot be undone.')) return;
+    setDeletingId(id);
+    try {
+      await deleteDoc(doc(db, 'homepageContent', id));
+    } catch (err: any) {
+      console.error('Delete failed:', err);
+      alert(`Failed to delete: ${err.message || err}`);
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const TYPE_COLORS: Record<string, string> = {
@@ -515,7 +527,16 @@ export default function HomepageManager() {
                       <button onClick={() => openEdit(item)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button onClick={() => handleDelete(item.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        disabled={deletingId === item.id}
+                        className={cn(
+                          'p-2 rounded-lg transition-colors',
+                          deletingId === item.id
+                            ? 'text-red-400 bg-red-50 cursor-wait animate-pulse'
+                            : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                        )}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

@@ -45,6 +45,7 @@ export default function CategoriesManager() {
   const [newSubLabel, setNewSubLabel] = useState('');
   const [saving, setSaving] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Seed Firestore from static config (one-time)
   const handleSeedCategories = async () => {
@@ -99,10 +100,13 @@ export default function CategoriesManager() {
 
   const handleDelete = async (id: string) => {
     if (!window.confirm(`Delete category "${id}"? Products in this category will become uncategorized.`)) return;
+    setDeletingId(id);
     try {
       await deleteDoc(doc(db, 'categories', id));
     } catch (e: any) {
-      alert('Failed to delete: ' + e.message);
+      alert('Failed to delete: ' + (e.message || e));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -421,7 +425,14 @@ export default function CategoriesManager() {
                   <button onClick={() => startEdit(cat)} className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDelete(cat.id)} className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                  <button 
+                    onClick={() => handleDelete(cat.id)} 
+                    disabled={deletingId === cat.id}
+                    className={cn(
+                      'p-2 rounded-lg transition-colors',
+                      deletingId === cat.id ? 'text-red-400 bg-red-50 cursor-wait animate-pulse' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                    )}
+                  >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>

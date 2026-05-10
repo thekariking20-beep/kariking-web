@@ -22,6 +22,7 @@ export default function StaffManagement() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Form state
   const [showForm, setShowForm] = useState(false);
@@ -210,15 +211,16 @@ export default function StaffManagement() {
   const handleDeleteStaff = async (staffPhone: string) => {
     if (!confirm(`Are you sure you want to remove ${staffPhone}?`)) return;
     
-    setActionLoading(true);
+    setDeletingId(staffPhone);
     try {
       await deleteDoc(doc(db, 'provisionedStaff', staffPhone));
       setSuccess(`Removed ${staffPhone}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to remove staff member.');
+      setError(`Failed to remove staff member: ${err.message || err}`);
+      alert(`Failed to remove staff member: ${err.message || err}`);
     } finally {
-      setActionLoading(false);
+      setDeletingId(null);
     }
   };
 
@@ -459,8 +461,12 @@ export default function StaffManagement() {
                 {/* Delete */}
                 <button
                   onClick={() => handleDeleteStaff(s.phone)}
-                  disabled={actionLoading}
-                  className="p-2 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                  disabled={actionLoading || deletingId === s.phone}
+                  className={`p-2 rounded-lg transition-colors ${
+                    deletingId === s.phone 
+                      ? 'text-red-400 bg-red-50 cursor-wait animate-pulse' 
+                      : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
+                  }`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>

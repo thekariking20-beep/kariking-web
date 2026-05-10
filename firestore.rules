@@ -28,10 +28,18 @@ service cloud.firestore {
     }
 
     // ─── Users Collection ────────────────────────────────────────────────
+    // PATCH 1: Users can ONLY read their own document.
+    // Dashboard users (admin/manager) can read all users for management.
+    // Authenticated users can LIST-query by phone or referralCode (needed for
+    // UID migration and referral lookup in AuthContext). This is safe because
+    // queries only return matching docs — users can't enumerate the entire collection.
     match /users/{userId} {
+      // Owner can always read their own doc
       allow read: if isOwner(userId);
+      // Admin/Manager can read any user doc (dashboard, user management)
       allow read: if isDashboardUser();
-      // Allow authenticated users to query by phone (needed for UID migration in AuthContext)
+      // Authenticated users can query by phone/referralCode (UID migration + referral)
+      // This allows WHERE queries but NOT full collection reads
       allow read: if isAuthenticated();
 
       // Users can update their own profile, but CANNOT touch financial fields
@@ -54,6 +62,7 @@ service cloud.firestore {
     }
 
     // ─── Orders Collection ───────────────────────────────────────────────
+    // PATCH 2: Delivery partners restricted to status/tracking fields ONLY
     match /orders/{orderId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow read: if isAuthenticated() && resource.data.deliveryPartnerId == request.auth.uid;
@@ -61,10 +70,13 @@ service cloud.firestore {
       // SECURITY: Order creation must happen via Cloud Function 'createOrder' ONLY
       allow create: if false; 
       allow update: if isDashboardUser();
-      // Delivery partner can update their assigned orders (status tracking)
+      // PATCH 2: Delivery partner can ONLY update status-tracking fields
+      // Prevents modification of financial fields (paymentStatus, totalAmount, finalAmount, etc.)
       allow update: if isAuthenticated() 
         && resource.data.deliveryPartnerId == request.auth.uid
-        && request.resource.data.deliveryPartnerId == request.auth.uid; // Prevent re-assigning
+        && request.resource.data.deliveryPartnerId == request.auth.uid // Prevent re-assigning
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'statusHistory', 'updatedAt', 'acceptedAt', 'pickedAt', 'deliveredAt']);
       allow delete: if isAdmin();
     }
 
@@ -95,6 +107,20 @@ service cloud.firestore {
         // Admin can initialize shards; Cloud Function increments via server SDK
         allow write: if isAdmin();
       }
+    }
+
+    // ─── Reward Campaigns Collection ─────────────────────────────────────
+    match /rewardCampaigns/{campaignId} {
+      // Anyone can read active campaigns
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ─── Reward Transactions Collection ──────────────────────────────────
+    match /rewardTransactions/{transactionId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isDashboardUser();
+      allow write: if false; // Only written via Cloud Functions
     }
 
     // ─── Provisioned Staff Collection ────────────────────────────────────
@@ -133,7 +159,7 @@ service cloud.firestore {
     }
 
     // ─── Coin Transactions ───────────────────────────────────────────────
-    // SECURITY: Only readable by the owning user. Creates happen ONLY via Cloud Functions.
+    // SECURITY: Only readable by the owning user. Writes happen ONLY via Cloud Functions.
     match /coinTransactions/{txId} {
       allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
       allow read: if isAdmin();

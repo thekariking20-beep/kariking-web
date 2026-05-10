@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit, getDocs, startAfter, DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
-import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -16,15 +16,19 @@ import AdminOrdersTab from '../components/admin/AdminOrdersTab';
 import AdminBookingsTab from '../components/admin/AdminBookingsTab';
 import CategoriesManager from '../components/admin/CategoriesManager';
 import CouponManager from '../components/admin/CouponManager';
+import RewardCampaignManager from '../components/admin/RewardCampaignManager';
 import { useCategories } from '../context/CategoriesContext';
 import { useNavigate } from 'react-router-dom';
 import { processReferralReward } from '../lib/referralReward';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons' | 'campaigns'>('dashboard');
   const { categories: dynamicCategories, getSubCategories: getDynamicSubCategories } = useCategories();
   
+  const [revenueData, setRevenueData] = useState<{date: string, amount: number}[]>([]);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -148,9 +152,9 @@ export default function Admin() {
         err => console.error('Users listener:', err)
       ));
 
-      // Referrals (admin only)
+      // Referrals (admin only) — PATCH 6: Paginated to limit(100) to prevent OOM at scale
       unsubs.push(onSnapshot(
-        query(collection(db, 'referrals'), orderBy('createdAt', 'desc')),
+        query(collection(db, 'referrals'), orderBy('createdAt', 'desc'), limit(100)),
         snap => setReferrals(snap.docs.map(d => ({ id: d.id, ...d.data() } as Referral))),
         err => console.error('Referrals listener:', err)
       ));
@@ -243,11 +247,15 @@ export default function Admin() {
 
   const handleProductDelete = async (id: string) => {
     if (!isAdmin || !window.confirm('Are you sure you want to delete this product?')) return;
+    setDeletingId(id);
     try {
       await deleteDoc(doc(db, 'products', id));
       setProducts(prev => prev.filter(p => p.id !== id));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error deleting product:", error);
+      alert(`Failed to delete product: ${error.message || error}`);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -365,6 +373,7 @@ export default function Admin() {
     { id: 'categories', label: 'Categories', icon: Layers },
     { id: 'homepage', label: 'Homepage', icon: Globe },
     { id: 'coupons', label: 'Coupons', icon: Tag },
+    { id: 'campaigns', label: 'Campaigns', icon: Zap },
     ...(isAdmin ? [
       { id: 'users', label: 'Users & Roles', icon: Users },
       { id: 'provisioning', label: 'Provisioning', icon: Shield },
@@ -883,7 +892,17 @@ export default function Admin() {
                               <td className="p-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
                                   <button onClick={() => startEdit(product)} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 className="w-5 h-5" /></button>
-                                  <button onClick={() => handleProductDelete(product.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-5 h-5" /></button>
+                                  <button 
+                                    onClick={() => handleProductDelete(product.id)} 
+                                    disabled={deletingId === product.id}
+                                    className={`p-2 rounded-lg transition-colors ${
+                                      deletingId === product.id 
+                                        ? 'text-red-400 bg-red-50 cursor-wait animate-pulse' 
+                                        : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
+                                    }`}
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
                                 </div>
                               </td>
                             )}
@@ -1127,6 +1146,11 @@ export default function Admin() {
               {/* COUPONS MANAGER */}
               {activeTab === 'coupons' && (
                 <CouponManager />
+              )}
+
+              {/* REWARD CAMPAIGNS MANAGER */}
+              {activeTab === 'campaigns' && (
+                <RewardCampaignManager />
               )}
             </motion.div>
           </AnimatePresence>

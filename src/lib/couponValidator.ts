@@ -62,20 +62,23 @@ export async function validateCoupon(
       return fail('This coupon is not yet valid.');
     }
   }
-  if (coupon.validTill && coupon.validTill.trim()) {
-    const tillDate = new Date(coupon.validTill);
+  const expiryDateString = coupon.expiresAt || coupon.validTill;
+  if (expiryDateString && expiryDateString.trim()) {
+    const tillDate = new Date(expiryDateString);
     if (!isNaN(tillDate.getTime()) && tillDate < now) {
       return fail('This coupon has expired.');
     }
   }
 
-  // ── Minimum order check ───────────────────────────────────────────────────
-  if (subtotal < coupon.minOrder) {
-    return fail(`Minimum order of ₹${coupon.minOrder} required. Add ₹${coupon.minOrder - subtotal} more.`);
+  // ── Minimum order amount ──────────────────────────────────────────────────
+  const minOrder = coupon.minimumOrderAmount ?? coupon.minOrder ?? 0;
+  if (subtotal < minOrder) {
+    return fail(`Minimum order amount is ₹${minOrder} for this coupon.`);
   }
 
-  // ── Global usage limit (distributed counter) ──────────────────────────
-  if (coupon.totalUsageLimit > 0) {
+  // ── Global usage limit ────────────────────────────────────────────────────
+  const globalLimit = coupon.usageLimit ?? coupon.totalUsageLimit ?? 0;
+  if (globalLimit > 0) {
     // Sum all shard counts for accurate total
     let totalUsed = coupon.usedCount || 0; // fallback to legacy field
     try {
@@ -84,25 +87,24 @@ export async function validateCoupon(
         totalUsed = 0;
         shardsSnap.forEach(s => { totalUsed += s.data().count || 0; });
       }
-    } catch { /* fallback to legacy usedCount */ }
-    if (totalUsed >= coupon.totalUsageLimit) {
+    } catch { /* ignore */ }
+    if (totalUsed >= globalLimit) {
       return fail('This coupon has reached its usage limit.');
     }
   }
 
   // ── Per-user usage limit ──────────────────────────────────────────────────
-  if (coupon.usageLimit > 0) {
+  const perUserLimit = coupon.perUserLimit ?? 0;
+  if (perUserLimit > 0) {
     const usedCoupons = user.usedCoupons || [];
     const userUsageCount = usedCoupons.filter(c => c === upperCode).length;
-    if (userUsageCount >= coupon.usageLimit) {
-      return fail('You have already used this coupon.');
+    if (userUsageCount >= perUserLimit) {
+      return fail('You have already reached the usage limit for this coupon.');
     }
   }
 
   // ── New user gate ─────────────────────────────────────────────────────────
   if (coupon.forNewUsers) {
-    // Use the user's usedCoupons array or order count from their profile
-    // This avoids a compound Firestore query that requires a composite index
     const usedCoupons = user.usedCoupons || [];
     if (usedCoupons.length > 0) {
       return fail('This coupon is valid for first orders only.');
@@ -111,14 +113,17 @@ export async function validateCoupon(
 
   // ── Calculate discount ────────────────────────────────────────────────────
   let discount = 0;
+  // Support both new `type` and legacy `discountType` for backward compatibility
+  const couponType = coupon.type || coupon.discountType;
+  const maxDiscount = coupon.maxDiscountAmount ?? coupon.maxDiscount ?? 0;
 
-  if (coupon.discountType === 'flat') {
+  if (couponType === 'flat') {
     discount = coupon.discountValue;
-  } else if (coupon.discountType === 'percentage') {
+  } else if (couponType === 'percentage') {
     discount = Math.round((subtotal * coupon.discountValue) / 100);
     // Apply max discount cap
-    if (coupon.maxDiscount > 0 && discount > coupon.maxDiscount) {
-      discount = coupon.maxDiscount;
+    if (maxDiscount > 0 && discount > maxDiscount) {
+      discount = maxDiscount;
     }
   }
 

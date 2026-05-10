@@ -13,15 +13,17 @@ import { cn } from '../../lib/utils';
 
 const EMPTY_FORM = {
   code: '',
-  discountType: 'flat' as 'flat' | 'percentage',
+  title: '',
+  description: '',
+  type: 'flat' as 'flat' | 'percentage',
   discountValue: 0,
-  minOrder: 0,
-  maxDiscount: 0,
-  usageLimit: 1,
-  totalUsageLimit: 1000,
+  minimumOrderAmount: 0,
+  maxDiscountAmount: 0,
+  perUserLimit: 1,
+  usageLimit: 1000,
   forNewUsers: false,
   validFrom: '',
-  validTill: '',
+  expiresAt: '',
 };
 
 export default function CouponManager() {
@@ -47,7 +49,7 @@ export default function CouponManager() {
   const handleCreate = async () => {
     if (!form.code.trim()) { setError('Coupon code is required.'); return; }
     if (form.discountValue <= 0) { setError('Discount value must be > 0.'); return; }
-    if (!form.validTill) { setError('Expiry date is required.'); return; }
+    if (!form.expiresAt) { setError('Expiry date is required.'); return; }
 
     // Check duplicate
     if (coupons.some(c => c.code === form.code.trim().toUpperCase())) {
@@ -60,16 +62,18 @@ export default function CouponManager() {
     try {
       const couponRef = await addDoc(collection(db, 'coupons'), {
         code: form.code.trim().toUpperCase(),
-        discountType: form.discountType,
+        title: form.title.trim() || `${form.type === 'flat' ? '₹' : ''}${form.discountValue}${form.type === 'percentage' ? '%' : ''} OFF`,
+        description: form.description.trim(),
+        type: form.type,
         discountValue: Number(form.discountValue),
-        minOrder: Number(form.minOrder),
-        maxDiscount: Number(form.maxDiscount),
+        minimumOrderAmount: Number(form.minimumOrderAmount),
+        maxDiscountAmount: Number(form.maxDiscountAmount),
+        perUserLimit: Number(form.perUserLimit),
         usageLimit: Number(form.usageLimit),
-        totalUsageLimit: Number(form.totalUsageLimit),
         usedCount: 0,
         isActive: true,
         validFrom: form.validFrom || new Date().toISOString(),
-        validTill: new Date(form.validTill + 'T23:59:59').toISOString(),
+        expiresAt: new Date(form.expiresAt + 'T23:59:59').toISOString(),
         forNewUsers: form.forNewUsers,
         createdAt: new Date().toISOString(),
       });
@@ -156,6 +160,30 @@ export default function CouponManager() {
                   />
                 </div>
 
+                {/* Title */}
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Title (Optional)</label>
+                  <input
+                    type="text"
+                    value={form.title}
+                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                    placeholder="₹200 OFF"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Description (Optional)</label>
+                  <input
+                    type="text"
+                    value={form.description}
+                    onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="Flat ₹200 OFF on orders above ₹999"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
+                  />
+                </div>
+
                 {/* Discount Type */}
                 <div>
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Discount Type</label>
@@ -163,10 +191,10 @@ export default function CouponManager() {
                     {(['flat', 'percentage'] as const).map(t => (
                       <button
                         key={t}
-                        onClick={() => setForm(f => ({ ...f, discountType: t }))}
+                        onClick={() => setForm(f => ({ ...f, type: t }))}
                         className={cn(
                           "flex-1 py-3 rounded-xl text-sm font-bold border-2 transition-all",
-                          form.discountType === t
+                          form.type === t
                             ? "border-red-500 bg-red-50 text-red-700"
                             : "border-gray-100 bg-white text-gray-500 hover:border-gray-200"
                         )}
@@ -180,13 +208,13 @@ export default function CouponManager() {
                 {/* Value */}
                 <div>
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">
-                    {form.discountType === 'flat' ? 'Discount (₹)' : 'Discount (%)'}
+                    {form.type === 'flat' ? 'Discount (₹)' : 'Discount (%)'}
                   </label>
                   <input
                     type="number"
                     value={form.discountValue || ''}
                     onChange={e => setForm(f => ({ ...f, discountValue: Number(e.target.value) }))}
-                    placeholder={form.discountType === 'flat' ? '100' : '10'}
+                    placeholder={form.type === 'flat' ? '100' : '10'}
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                   />
                 </div>
@@ -196,21 +224,21 @@ export default function CouponManager() {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Min Order (₹)</label>
                   <input
                     type="number"
-                    value={form.minOrder || ''}
-                    onChange={e => setForm(f => ({ ...f, minOrder: Number(e.target.value) }))}
+                    value={form.minimumOrderAmount || ''}
+                    onChange={e => setForm(f => ({ ...f, minimumOrderAmount: Number(e.target.value) }))}
                     placeholder="299"
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                   />
                 </div>
 
                 {/* Max Discount (percentage only) */}
-                {form.discountType === 'percentage' && (
+                {form.type === 'percentage' && (
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Max Discount (₹)</label>
                     <input
                       type="number"
-                      value={form.maxDiscount || ''}
-                      onChange={e => setForm(f => ({ ...f, maxDiscount: Number(e.target.value) }))}
+                      value={form.maxDiscountAmount || ''}
+                      onChange={e => setForm(f => ({ ...f, maxDiscountAmount: Number(e.target.value) }))}
                       placeholder="200"
                       className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                     />
@@ -222,8 +250,8 @@ export default function CouponManager() {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Per-User Limit</label>
                   <input
                     type="number"
-                    value={form.usageLimit || ''}
-                    onChange={e => setForm(f => ({ ...f, usageLimit: Number(e.target.value) }))}
+                    value={form.perUserLimit || ''}
+                    onChange={e => setForm(f => ({ ...f, perUserLimit: Number(e.target.value) }))}
                     placeholder="1"
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                   />
@@ -234,8 +262,8 @@ export default function CouponManager() {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Total Usage Limit</label>
                   <input
                     type="number"
-                    value={form.totalUsageLimit || ''}
-                    onChange={e => setForm(f => ({ ...f, totalUsageLimit: Number(e.target.value) }))}
+                    value={form.usageLimit || ''}
+                    onChange={e => setForm(f => ({ ...f, usageLimit: Number(e.target.value) }))}
                     placeholder="1000"
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                   />
@@ -246,8 +274,8 @@ export default function CouponManager() {
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1.5 block">Valid Till</label>
                   <input
                     type="date"
-                    value={form.validTill}
-                    onChange={e => setForm(f => ({ ...f, validTill: e.target.value }))}
+                    value={form.expiresAt}
+                    onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none"
                   />
                 </div>
@@ -299,10 +327,16 @@ export default function CouponManager() {
       ) : (
         <div className="space-y-3">
           {coupons.map(coupon => {
-            const isExpired = new Date(coupon.validTill) < new Date();
-            const usagePercent = coupon.totalUsageLimit > 0
-              ? Math.round((coupon.usedCount / coupon.totalUsageLimit) * 100)
+            const expiryDateString = coupon.expiresAt || coupon.validTill;
+            const isExpired = expiryDateString ? new Date(expiryDateString) < new Date() : false;
+            const globalLimit = coupon.usageLimit ?? coupon.totalUsageLimit ?? 0;
+            const usagePercent = globalLimit > 0
+              ? Math.round(((coupon.usedCount || 0) / globalLimit) * 100)
               : 0;
+            const type = coupon.type || coupon.discountType;
+            const minOrder = coupon.minimumOrderAmount ?? coupon.minOrder ?? 0;
+            const maxDiscount = coupon.maxDiscountAmount ?? coupon.maxDiscount ?? 0;
+            const perUserLimit = coupon.perUserLimit ?? coupon.usageLimit ?? 0;
 
             return (
               <motion.div
@@ -323,11 +357,11 @@ export default function CouponManager() {
                       </span>
                       <span className={cn(
                         "text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full",
-                        coupon.discountType === 'flat'
+                        type === 'flat'
                           ? "bg-green-100 text-green-700"
                           : "bg-blue-100 text-blue-700"
                       )}>
-                        {coupon.discountType === 'flat' ? `₹${coupon.discountValue} OFF` : `${coupon.discountValue}% OFF`}
+                        {type === 'flat' ? `₹${coupon.discountValue} OFF` : `${coupon.discountValue}% OFF`}
                       </span>
                       {coupon.forNewUsers && (
                         <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 flex items-center gap-0.5">
@@ -343,12 +377,12 @@ export default function CouponManager() {
 
                     {/* Details */}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 font-medium">
-                      <span>Min: ₹{coupon.minOrder}</span>
-                      {coupon.discountType === 'percentage' && coupon.maxDiscount > 0 && (
-                        <span>Max: ₹{coupon.maxDiscount}</span>
+                      <span>Min: ₹{minOrder}</span>
+                      {type === 'percentage' && maxDiscount > 0 && (
+                        <span>Max: ₹{maxDiscount}</span>
                       )}
-                      <span>Limit: {coupon.usageLimit}/user</span>
-                      <span>Expires: {new Date(coupon.validTill).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                      <span>Limit: {perUserLimit}/user</span>
+                      {expiryDateString && <span>Expires: {new Date(expiryDateString).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>}
                     </div>
 
                     {/* Usage bar */}
@@ -360,7 +394,7 @@ export default function CouponManager() {
                         />
                       </div>
                       <span className="text-[10px] font-bold text-gray-400 shrink-0">
-                        {coupon.usedCount}/{coupon.totalUsageLimit} used
+                        {coupon.usedCount || 0}/{globalLimit} used
                       </span>
                     </div>
                   </div>

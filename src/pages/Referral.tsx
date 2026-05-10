@@ -22,16 +22,41 @@ export default function Referral() {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(
+    // Listen to legacy coinTransactions (referral rewards)
+    const q1 = query(
       collection(db, 'coinTransactions'),
       where('userId', '==', user.uid),
       orderBy('createdAt', 'desc')
     );
 
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setTransactions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CoinTransaction)));
+    // Listen to new rewardTransactions (order rewards + redemptions)
+    const q2 = query(
+      collection(db, 'rewardTransactions'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    let coinTxns: CoinTransaction[] = [];
+    let rewardTxns: CoinTransaction[] = [];
+
+    const mergeTxns = () => {
+      // Merge and sort by createdAt descending
+      const all = [...coinTxns, ...rewardTxns].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setTransactions(all);
       setLoading(false);
-    });
+    };
+
+    const unsub1 = onSnapshot(q1, (snap) => {
+      coinTxns = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CoinTransaction));
+      mergeTxns();
+    }, () => { setLoading(false); });
+
+    const unsub2 = onSnapshot(q2, (snap) => {
+      rewardTxns = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CoinTransaction));
+      mergeTxns();
+    }, () => { /* ignore errors on new collection */ });
 
     const qReferrals = query(
       collection(db, 'referrals'),
@@ -44,7 +69,8 @@ export default function Referral() {
     });
 
     return () => {
-      unsubscribe();
+      unsub1();
+      unsub2();
       unsubReferrals();
     };
   }, [user]);
@@ -257,14 +283,16 @@ export default function Referral() {
               <p className="text-gray-500">No coin transactions yet. Refer friends to earn coins!</p>
             </div>
           ) : (
-            transactions.map((tx) => (
+            transactions.map((tx) => {
+              const isEarning = tx.type === 'earning' || tx.type === 'earned';
+              return (
               <div key={tx.id} className="p-5 flex items-center justify-between hover:bg-gray-50 transition-colors">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <div className={cn(
                     "p-2 rounded-xl shrink-0",
-                    tx.type === 'earning' ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
+                    isEarning ? "bg-green-50 text-green-600" : "bg-red-50 text-red-600"
                   )}>
-                    {tx.type === 'earning' ? <ArrowRight className="w-4 h-4 rotate-[-45deg]" /> : <ArrowRight className="w-4 h-4 rotate-[135deg]" />}
+                    {isEarning ? <ArrowRight className="w-4 h-4 rotate-[-45deg]" /> : <ArrowRight className="w-4 h-4 rotate-[135deg]" />}
                   </div>
                   <div className="min-w-0">
                     <p className="font-bold text-gray-900 text-sm truncate">{tx.source}</p>
@@ -277,12 +305,12 @@ export default function Referral() {
                 </div>
                 <span className={cn(
                   "font-black text-sm shrink-0 ml-3",
-                  tx.type === 'earning' ? "text-green-600" : "text-red-600"
+                  isEarning ? "text-green-600" : "text-red-600"
                 )}>
-                  {tx.type === 'earning' ? '+' : '-'}{tx.amount} coins
+                  {isEarning ? '+' : '-'}{tx.amount} coins
                 </span>
               </div>
-            ))
+            )})
           )}
         </div>
       </section>

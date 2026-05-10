@@ -20,11 +20,12 @@ export const auth = getAuth(app);
 
 // Explicit LOCAL persistence — user stays logged in until manual logout
 setPersistence(auth, browserLocalPersistence).catch(console.error);
+
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);
 export const functions = getFunctions(app, 'us-central1');
 
-// Offline Mode Resiliency
+// Offline Mode Resiliency — enable IndexedDB persistence for offline support
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code == 'failed-precondition') {
     console.warn('Multiple tabs open, persistence disabled');

@@ -103,25 +103,8 @@ export async function processReferralReward(userId: string, orderId: string): Pr
       });
     });
 
-    // ─── Audit logs (outside transaction — non-blocking) ──────────────
-    await Promise.allSettled([
-      addDoc(collection(db, 'coinTransactions'), {
-        userId: referrerId,
-        amount: REFERRER_COIN_REWARD,
-        type: 'earning',
-        source: `Referral reward — ${referral.referredUserPhone || userId} completed first order`,
-        referralId: referralDocSnap.id,
-        createdAt: now,
-      }),
-      addDoc(collection(db, 'coinTransactions'), {
-        userId: userId,
-        amount: REFERRED_COIN_REWARD,
-        type: 'earning',
-        source: 'Welcome bonus — first order completed!',
-        referralId: referralDocSnap.id,
-        createdAt: now,
-      }),
-    ]);
+    // Audit logs are now written server-side in onOrderStatusChange (Cloud Function)
+    // Server SDK bypasses Firestore rules, ensuring logs always persist.
 
     console.log(`✅ Referral reward processed: referrer=${referrerId}, referred=${userId}`);
   } catch (error) {

@@ -7,12 +7,13 @@ import ProductGrid from '../components/ProductGrid';
 import BannerSlider from '../components/home/BannerSlider';
 import OffersRow from '../components/home/OffersRow';
 import CountdownStrip from '../components/home/CountdownStrip';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Star, Clock, ShieldCheck, ChevronRight, Flame, ArrowRight, ShoppingCart } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useCategories } from '../context/CategoriesContext';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useRewardCampaign } from '../hooks/useRewardCampaign';
 
 // ─── Default CMS content used when Firestore has nothing yet ─────────────────
 const DEFAULT_BANNERS: HomepageContent[] = [
@@ -78,6 +79,7 @@ export default function Home() {
   const { addToCart } = useCart();
   const navigate = useNavigate();
   const { categories: MAIN_CATEGORIES } = useCategories();
+  const { activeCampaign } = useRewardCampaign();
 
   const [products, setProducts] = useState<Product[]>(() => {
     // Instant load from cache
@@ -282,6 +284,46 @@ export default function Home() {
         </h1>
         <p className="text-gray-500 text-sm font-medium mt-0.5">Let's crave something fresh today.</p>
       </div>
+
+      {/* ─── DOUBLE COINS CAMPAIGN BANNER ─── */}
+      <AnimatePresence>
+        {activeCampaign && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-gradient-to-r from-orange-600 via-red-600 to-rose-600 rounded-2xl p-4 shadow-lg shadow-red-600/20 text-white relative overflow-hidden"
+          >
+            {/* Shimmer effect */}
+            <div className="absolute inset-0 translate-x-[-100%] animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12" />
+            <div className="relative z-10 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/20 p-2.5 rounded-xl backdrop-blur-sm">
+                  <Flame className="w-6 h-6 text-yellow-300 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg tracking-tight leading-tight flex items-center gap-2">
+                    {activeCampaign.title}
+                    <span className="bg-yellow-400 text-orange-900 text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full">
+                      {activeCampaign.multiplier}x Coins
+                    </span>
+                  </h3>
+                  {activeCampaign.description && (
+                    <p className="text-white/80 text-xs font-medium mt-0.5 max-w-[280px] sm:max-w-md">
+                      {activeCampaign.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="hidden sm:flex shrink-0">
+                <Link to="/products" className="bg-white text-red-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-50 transition-colors shadow-sm">
+                  Order Now
+                </Link>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ─── BANNER SLIDER ──────────────────────────────────────────────────── */}
       {cmsLoading ? (

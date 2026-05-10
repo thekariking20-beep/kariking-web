@@ -173,12 +173,14 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   if (after.status === "Delivered") {
 
     // 5. Check if we need to unlock referral coins (first order delivered)
+    // PATCH 3: Server-side referral handler now writes audit logs to coinTransactions.
+    // Server SDK bypasses Firestore rules, so writes always succeed.
     try {
       const userRef = db.doc(`users/${after.userId}`);
       const userDoc = await userRef.get();
       if (userDoc.exists) {
         const userData = userDoc.data();
-        if (userData.referredBy) {
+        if (userData.referredBy && !userData.referredRewardGiven) {
           // Verify if this is truly the FIRST delivered order
           const previousOrders = await db.collection("orders")
             .where("userId", "==", after.userId)
@@ -191,11 +193,20 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             const referrersQuery = await db.collection("users").where("referralCode", "==", userData.referredBy).get();
             if (!referrersQuery.empty) {
               const referrerDoc = referrersQuery.docs[0];
-              // Convert lockedCoins to coins
-              // We'll just add 5 coins and remove 5 lockedCoins.
+              const now = new Date().toISOString();
+
+              // Convert lockedCoins to coins (safe: never go below 0)
+              const currentLocked = referrerDoc.data().lockedCoins || 0;
+              const safeDecrement = Math.min(5, currentLocked);
               await referrerDoc.ref.update({
                 coins: FieldValue.increment(5),
-                lockedCoins: FieldValue.increment(-5)
+                lockedCoins: FieldValue.increment(-safeDecrement)
+              });
+
+              // Reward referred user + set duplicate guard
+              await userRef.update({
+                coins: FieldValue.increment(2),
+                referredRewardGiven: true,
               });
 
               // Mark referral as completed
@@ -204,9 +215,36 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                 .where("status", "==", "pending")
                 .get();
 
-              referralRecords.forEach(async (doc) => {
-                await doc.ref.update({ status: "completed", completedAt: new Date().toISOString() });
-              });
+              const referralId = referralRecords.empty ? null : referralRecords.docs[0].id;
+
+              for (const refDoc of referralRecords.docs) {
+                await refDoc.ref.update({
+                  status: "completed",
+                  rewardGiven: true,
+                  completedAt: now,
+                  completedOrderId: orderId,
+                });
+              }
+
+              // PATCH 3: Write audit logs to coinTransactions (server SDK bypasses rules)
+              await Promise.allSettled([
+                db.collection("coinTransactions").add({
+                  userId: referrerDoc.id,
+                  amount: 5,
+                  type: "earning",
+                  source: `Referral reward — ${userData.phone || after.userId} completed first order`,
+                  referralId: referralId,
+                  createdAt: now,
+                }),
+                db.collection("coinTransactions").add({
+                  userId: after.userId,
+                  amount: 2,
+                  type: "earning",
+                  source: "Welcome bonus — first order completed!",
+                  referralId: referralId,
+                  createdAt: now,
+                }),
+              ]);
 
               // Notify Referrer
               const refToken = referrerDoc.data().fcmToken;
@@ -219,7 +257,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                   }
                 }).catch(() => {});
               }
-              console.log(`🎁 Referral bonus unlocked for referrer ${referrerDoc.id}`);
+              console.log(`🎁 Referral bonus: referrer=${referrerDoc.id} (+5), referred=${after.userId} (+2), order=${orderId}`);
             }
           }
         }
@@ -328,29 +366,46 @@ exports.createOrder = onCall(async (request) => {
         if (!freshCoupon.isActive) return { valid: false };
 
         const now = new Date();
-        if (freshCoupon.validTill && new Date(freshCoupon.validTill) < now) return { valid: false };
+        const expiryDateString = freshCoupon.expiresAt || freshCoupon.validTill;
+        if (expiryDateString && new Date(expiryDateString) < now) return { valid: false };
         if (freshCoupon.validFrom && new Date(freshCoupon.validFrom) > now) return { valid: false };
-        if (totalPrice < freshCoupon.minOrder) return { valid: false };
+        
+        const minOrder = freshCoupon.minimumOrderAmount ?? freshCoupon.minOrder ?? 0;
+        if (totalPrice < minOrder) return { valid: false };
 
         // ── Distributed counter: sum shards for total usage ──────────────
-        if (freshCoupon.totalUsageLimit > 0) {
+        const globalLimit = freshCoupon.usageLimit ?? freshCoupon.totalUsageLimit ?? 0;
+        if (globalLimit > 0) {
           const shardsSnap = await db.collection(`coupons/${couponDoc.id}/shards`).get();
           let totalUsed = freshCoupon.usedCount || 0; // fallback to legacy field
           if (!shardsSnap.empty) {
             totalUsed = 0;
             shardsSnap.forEach((s) => { totalUsed += s.data().count || 0; });
           }
-          if (totalUsed >= freshCoupon.totalUsageLimit) return { valid: false };
+          if (totalUsed >= globalLimit) return { valid: false };
+        }
+
+        // ── Per-user limit validation ────────────────────────────────────
+        const perUserLimit = freshCoupon.perUserLimit ?? 0;
+        if (perUserLimit > 0) {
+          const userDoc = await transaction.get(db.doc(`users/${userId}`));
+          const usedCoupons = (userDoc.exists && userDoc.data().usedCoupons) || [];
+          const userUsageCount = usedCoupons.filter(c => c === upperCode).length;
+          if (userUsageCount >= perUserLimit) return { valid: false };
         }
 
         // Calculate discount
         let disc = 0;
-        if (freshCoupon.discountType === 'flat') {
+        // Support both new `type` and legacy `discountType` for backward compatibility
+        const couponType = freshCoupon.type || freshCoupon.discountType;
+        const maxDiscount = freshCoupon.maxDiscountAmount ?? freshCoupon.maxDiscount ?? 0;
+
+        if (couponType === 'flat') {
           disc = freshCoupon.discountValue;
-        } else if (freshCoupon.discountType === 'percentage') {
+        } else if (couponType === 'percentage') {
           disc = Math.round((totalPrice * freshCoupon.discountValue) / 100);
-          if (freshCoupon.maxDiscount > 0 && disc > freshCoupon.maxDiscount) {
-            disc = freshCoupon.maxDiscount;
+          if (maxDiscount > 0 && disc > maxDiscount) {
+            disc = maxDiscount;
           }
         }
         disc = Math.min(disc, totalPrice);
@@ -389,19 +444,21 @@ exports.createOrder = onCall(async (request) => {
       const availableCoins = userData.coins || 0;
       if (availableCoins <= 0) return { coinsUsed: 0, coinDiscount: 0 };
 
-      // Enforce 20% cap on subtotal after coupon
-      const maxCoinValue = Math.floor(subtotalAfterCoupon * COIN_CAP_PERCENT);
-      const maxCoinsByValue = Math.floor(maxCoinValue / COIN_VALUE);
-      const maxCoinsByBalance = availableCoins;
-      const maxCoins = Math.min(maxCoinsByBalance, maxCoinsByValue);
+      // Allow coins to cover up to 100% of remaining subtotal (leaving at least ₹1)
+      const maxRupeesForCoins = Math.max(0, subtotalAfterCoupon - 1);
+      const maxCoinsByValue = Math.floor(maxRupeesForCoins / COIN_VALUE);
+      const maxCoins = Math.min(availableCoins, maxCoinsByValue);
 
       const actualCoins = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
       if (actualCoins <= 0) return { coinsUsed: 0, coinDiscount: 0 };
 
       const coinDiscount = actualCoins * COIN_VALUE;
 
-      // Atomically deduct coins
-      transaction.update(userRef, { coins: FieldValue.increment(-actualCoins) });
+      // Atomically deduct coins and track totalRedeemed
+      transaction.update(userRef, { 
+        coins: FieldValue.increment(-actualCoins),
+        totalCoinsRedeemed: FieldValue.increment(actualCoins)
+      });
 
       return { coinsUsed: actualCoins, coinDiscount };
     });
@@ -411,10 +468,12 @@ exports.createOrder = onCall(async (request) => {
 
     // Log coin transaction (outside main transaction for non-blocking)
     if (coinsUsed > 0) {
-      await db.collection("coinTransactions").add({
+      await db.collection("rewardTransactions").add({
         userId,
+        orderId: null, // Order not created yet
         amount: coinsUsed,
-        type: "spending",
+        rupeeValue: coinResult.coinDiscount,
+        type: "redeemed",
         source: "Order Discount",
         createdAt: new Date().toISOString()
       });
@@ -424,8 +483,8 @@ exports.createOrder = onCall(async (request) => {
     const userDoc = await db.doc(`users/${userId}`).get();
     const availableCoins = (userDoc.exists && userDoc.data().coins) || 0;
     if (availableCoins > 0) {
-      const maxCoinValue = Math.floor(subtotalAfterCoupon * COIN_CAP_PERCENT);
-      const maxCoinsByValue = Math.floor(maxCoinValue / COIN_VALUE);
+      const maxRupeesForCoins = Math.max(0, subtotalAfterCoupon - 1);
+      const maxCoinsByValue = Math.floor(maxRupeesForCoins / COIN_VALUE);
       const maxCoins = Math.min(availableCoins, maxCoinsByValue);
       coinsUsed = requestedCoins ? Math.min(requestedCoins, maxCoins) : maxCoins;
       discountAmount += coinsUsed * COIN_VALUE;
@@ -470,6 +529,10 @@ exports.createOrder = onCall(async (request) => {
     address,
     phone,
     coinsUsed,
+    coinsEarned: 0,
+    coinsRedeemed: coinsUsed,
+    coinDiscountAmount: coinsUsed * COIN_VALUE,
+    finalPaidAmount: Math.max(0, finalAmount),
     pendingCoinsDeduction: paymentMethod === 'qr' ? coinsUsed : 0,
     couponCode: appliedCouponCode || null,
     couponDiscount: couponDiscount,
@@ -650,24 +713,82 @@ exports.verifyQrPayment = onCall(async (request) => {
 
         if (actualDeduction > 0) {
           transaction.update(userRef, {
-            coins: FieldValue.increment(-actualDeduction)
+            coins: FieldValue.increment(-actualDeduction),
+            totalCoinsRedeemed: FieldValue.increment(actualDeduction)
           });
         }
       });
 
       // Log coin transaction
-      await db.collection("coinTransactions").add({
+      await db.collection("rewardTransactions").add({
         userId: order.userId,
+        orderId: orderId,
         amount: order.pendingCoinsDeduction,
-        type: "spending",
+        rupeeValue: order.pendingCoinsDeduction * 20, // 1 coin = 20
+        type: "redeemed",
         source: "Order Discount (UPI Verified)",
         createdAt: now
       });
     }
 
+    // ─── Double Coins Event Engine & Reward Calculation ───────────────────
+    let multiplier = 1;
+    let campaignId = null;
+    
+    // Check for an active campaign
+    const campaignsQuery = await db.collection('rewardCampaigns').where('isActive', '==', true).get();
+    if (!campaignsQuery.empty) {
+      const nowMs = Date.now();
+      for (const docSnap of campaignsQuery.docs) {
+        const camp = docSnap.data();
+        const starts = new Date(camp.startsAt).getTime();
+        const ends = new Date(camp.endsAt).getTime();
+        if (nowMs >= starts && nowMs <= ends) {
+          multiplier = camp.multiplier || 1;
+          campaignId = docSnap.id;
+          break; // only 1 active
+        }
+      }
+    }
+
+    // Calculate finalPaidAmount (totalAmount - couponDiscount - coinDiscount + deliveryFee)
+    // We already have `finalAmount` on the order doc, which represents the exact amount paid.
+    const finalPaidAmount = order.finalAmount || 0;
+    
+    // Calculate earnedCoins = floor(finalPaidAmount / 500) * multiplier
+    const earnedCoins = Math.floor(finalPaidAmount / 500) * multiplier;
+
+    if (earnedCoins > 0) {
+      await db.runTransaction(async (transaction) => {
+        const userRef = db.doc(`users/${order.userId}`);
+        const userSnap = await transaction.get(userRef);
+        if (userSnap.exists) {
+          transaction.update(userRef, {
+            coins: FieldValue.increment(earnedCoins),
+            totalCoinsEarned: FieldValue.increment(earnedCoins)
+          });
+        }
+      });
+
+      await db.collection('rewardTransactions').add({
+        userId: order.userId,
+        orderId: orderId,
+        amount: earnedCoins,
+        rupeeValue: earnedCoins * 20,
+        type: 'earned',
+        source: 'Order Completion',
+        multiplierApplied: multiplier,
+        campaignId: campaignId,
+        finalPaidAmount: finalPaidAmount,
+        createdAt: now
+      });
+    }
+
+    // PATCH 4: Single atomic update (was previously two separate writes)
     await orderRef.update({
       paymentStatus: "confirmed",
       pendingCoinsDeduction: 0,
+      coinsEarned: earnedCoins,
       verifiedAt: now,
       verifiedBy: request.auth.uid,
       updatedAt: now

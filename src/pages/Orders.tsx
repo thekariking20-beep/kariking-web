@@ -178,14 +178,7 @@ export default function Orders() {
     return () => unsub();
   }, [user, isAdmin]);
 
-  const updateStatus = async (orderId: string, status: Order['status']) => {
-    try {
-      const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      const newHistory = [...order.statusHistory, { status, time: new Date().toISOString() }];
-      await updateDoc(doc(db, 'orders', orderId), { status, statusHistory: newHistory, updatedAt: new Date().toISOString() });
-    } catch (e) { console.error(e); }
-  };
+
 
   if (loading) {
     return (
@@ -431,28 +424,7 @@ export default function Orders() {
                                 </div>
                               )}
 
-                              {/* Admin manual status controls */}
-                              {isAdmin && (
-                                <div>
-                                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Update Status</h4>
-                                  <div className="flex flex-wrap gap-2">
-                                    {Object.entries(STATUS_CONFIG).map(([key, c]) => (
-                                      <button
-                                        key={key}
-                                        onClick={() => updateStatus(order.id, key as Order['status'])}
-                                        className={cn(
-                                          'px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all',
-                                          order.status === key
-                                            ? cn(c.bg, c.color, 'ring-2 ring-offset-1 ring-current')
-                                            : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                                        )}
-                                      >
-                                        {c.label}
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
+
                             </div>
                           </div>
                         </div>

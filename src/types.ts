@@ -29,6 +29,8 @@ export interface User {
   createdAt: string;
   notificationEnabled?: boolean;
   usedCoupons?: string[];    // coupon codes this user has redeemed
+  totalCoinsEarned?: number;
+  totalCoinsRedeemed?: number;
 }
 
 export interface UserAddress {
@@ -118,8 +120,13 @@ export interface CoinTransaction {
   id: string;
   userId: string;
   amount: number;
-  type: 'earning' | 'spending';
+  rupeeValue?: number;
+  type: 'earning' | 'spending' | 'earned' | 'redeemed';
   source: string;
+  orderId?: string;
+  referralId?: string;
+  multiplierApplied?: number;
+  campaignId?: string;
   createdAt: string;
 }
 
@@ -240,6 +247,12 @@ export interface Order {
   deliveredAt?: string;
   createdAt: string;
   updatedAt: string;
+  // Reward system tracking
+  coinsEarned?: number;
+  coinsRedeemed?: number;
+  coinsDiscountAmount?: number;
+  finalPaidAmount?: number;
+  pendingCoinsDeduction?: number;
 }
 
 export interface HomepageContent {
@@ -300,16 +313,39 @@ export interface SystemSettings {
 export interface Coupon {
   id: string;
   code: string;
-  discountType: 'flat' | 'percentage';
+  
+  // New Scalable Schema
+  title?: string;
+  description?: string;
+  type?: 'flat' | 'percentage';
+  minimumOrderAmount?: number;
+  maxDiscountAmount?: number;
+  perUserLimit?: number;
+  expiresAt?: string;
+  
+  // Legacy fields (maintained for backwards compatibility)
+  discountType?: 'flat' | 'percentage';
   discountValue: number;      // ₹ amount or %
-  minOrder: number;           // minimum subtotal to apply
-  maxDiscount: number;        // cap for percentage coupons
-  usageLimit: number;         // per-user limit (1 = one-time)
-  totalUsageLimit: number;    // global limit across all users
+  minOrder?: number;           // minimum subtotal to apply
+  maxDiscount?: number;        // cap for percentage coupons
+  usageLimit?: number;         // per-user limit (1 = one-time)
+  totalUsageLimit?: number;    // global limit across all users
   usedCount: number;          // current global usage
   isActive: boolean;
-  validFrom: string;          // ISO date
-  validTill: string;          // ISO date
+  validFrom?: string;          // ISO date
+  validTill?: string;          // ISO date
   forNewUsers: boolean;       // first-order only
+  createdAt: string;
+}
+
+// ─── Double Coins Event System ───────────────────────────────────────────────
+export interface RewardCampaign {
+  id?: string;
+  title: string;
+  multiplier: number;
+  isActive: boolean;
+  startsAt: string; // ISO string
+  endsAt: string;   // ISO string
+  description: string;
   createdAt: string;
 }

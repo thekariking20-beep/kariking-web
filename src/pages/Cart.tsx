@@ -27,13 +27,19 @@ const UPI_NAME = 'KARIKING';
 const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 export default function Cart() {
-  const { items, removeFromCart, updateQuantity, totalPrice, clearCart } = useCart();
+  const { items, removeFromCart, updateQuantity, totalPrice, clearCart, refreshPrices } = useCart();
   const { user, refreshUser } = useAuth();
   const { selectedAddress } = useAddress();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // PATCH 9: Refresh product prices from Firestore when Cart opens
+  useEffect(() => {
+    refreshPrices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Checkout reads directly from SSOT context
   const address = selectedAddress?.fullAddress || '';
@@ -69,18 +75,23 @@ export default function Cart() {
 
   const COIN_VALUE = 20;
   const availableCoins = user?.coins || 0;
-  // Cap: coins can cover at most 20% of subtotal (after coupon)
-  const subtotalAfterCoupon = Math.max(0, totalPrice - (appliedCoupon?.discount || 0));
-  const maxCoinsByPercentCap = Math.floor((subtotalAfterCoupon * 0.2) / COIN_VALUE);
-  const maxCoinsToUse = Math.min(availableCoins, maxCoinsByPercentCap);
+  
+  const couponDiscount = appliedCoupon?.discount || 0;
+  const subtotalAfterCoupon = Math.max(0, totalPrice - couponDiscount);
+  
+  // Allow coins to cover up to 100% of the remaining subtotal, ensuring final payable > ₹1
+  const maxRupeesForCoins = Math.max(0, subtotalAfterCoupon - 1);
+  const maxCoinsByOrderTotal = Math.floor(maxRupeesForCoins / COIN_VALUE);
+  const maxCoinsToUse = Math.min(availableCoins, maxCoinsByOrderTotal);
+  
   const coinsBeingUsed = useCoins ? maxCoinsToUse : 0;
   const coinDiscount = coinsBeingUsed * COIN_VALUE;
-  const couponDiscount = appliedCoupon?.discount || 0;
-  const discountAmount = coinDiscount + couponDiscount;
   
+  const discountAmount = coinDiscount + couponDiscount;
   const deliveryFee = totalPrice >= 500 || totalPrice === 0 ? 0 : 40;
+  
   const finalTotal = Math.round((Math.max(0, totalPrice - discountAmount) + deliveryFee) * 100) / 100;
-  const canPayFullyWithCoins = coinDiscount >= totalPrice - couponDiscount + deliveryFee;
+  const canPayFullyWithCoins = false; // We enforce minimum payable > 1, so full payment with coins alone is not possible
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
   const upiAmount = useMemo(() => (Math.round(finalTotal * 100) / 100).toFixed(2), [finalTotal]);
@@ -169,6 +180,9 @@ export default function Cart() {
     if (validationError) { setError(validationError); return; }
     if (checkoutInProgressRef.current) return; // Prevent double-click
     checkoutInProgressRef.current = true;
+
+    // PATCH 9: Refresh prices before checkout to prevent stale-price mismatch
+    await refreshPrices();
 
     if (!navigator.onLine) {
       setIsOffline(true);
@@ -564,13 +578,13 @@ export default function Cart() {
                 </div>
                 <div className="flex items-center justify-between">
                   <p className="text-[10px] text-gray-500">
-                    Available: <span className="font-bold text-amber-700">{availableCoins} coins</span> (₹{availableCoins * COIN_VALUE})
+                    Wallet Coins: <span className="font-bold text-amber-700">{availableCoins}</span> | Value: <span className="font-bold text-amber-700">₹{availableCoins * COIN_VALUE}</span>
                   </p>
                   <p className="text-[10px] text-gray-400">1 coin = ₹{COIN_VALUE}</p>
                 </div>
                 {maxCoinsToUse < availableCoins && maxCoinsToUse > 0 && (
                   <p className="text-[9px] text-amber-600 font-medium">
-                    Max usable: {maxCoinsToUse} coins (20% cap on this order)
+                    Max usable: {maxCoinsToUse} coins (to keep payable amount above ₹0)
                   </p>
                 )}
                 {useCoins && (
@@ -579,17 +593,8 @@ export default function Cart() {
                     animate={{ opacity: 1, height: 'auto' }}
                     className="flex justify-between text-sm font-bold border-t border-amber-200/50 pt-2"
                   >
-                    <span className="text-amber-700">Coin Discount ({coinsBeingUsed} coins)</span>
+                    <span className="text-amber-700">Coins Applied ({coinsBeingUsed} coins)</span>
                     <span className="text-green-600">-₹{coinDiscount}</span>
-                  </motion.div>
-                )}
-                {useCoins && canPayFullyWithCoins && (
-                  <motion.div 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }}
-                    className="text-[10px] font-black text-green-700 bg-green-100 px-2 py-1 rounded-lg text-center uppercase tracking-widest"
-                  >
-                    ✨ Fully payable with coins — no extra payment needed!
                   </motion.div>
                 )}
               </div>

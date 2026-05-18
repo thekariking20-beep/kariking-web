@@ -95,6 +95,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await setDoc(doc(db, 'users', fUser.uid), { authProvider: provider }, { merge: true });
             userData.authProvider = provider;
           }
+
+          // Existing user — referrals are for NEW users only, clear any pending code
+          localStorage.removeItem('pendingReferralCode');
           
           setUser(userData);
           // Register FCM token in background (non-blocking)
@@ -141,6 +144,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                   }
                 }
               }
+
+              // Existing phone = existing user — referrals only for NEW users
+              localStorage.removeItem('pendingReferralCode');
               
               setUser(migratedUser);
               registerPushNotifications(fUser.uid).catch(() => {});
@@ -180,7 +186,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           await setDoc(doc(db, 'users', fUser.uid), newUser);
           
-          // Handle referral rewards
+          // ─── Handle referral rewards — NEW USERS ONLY ─────────────
           if (referredBy) {
             try {
               // Guard: check if a referral already exists for this user (prevent duplicate on re-login)

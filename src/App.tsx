@@ -8,6 +8,7 @@ import FullScreenLoader from './components/FullScreenLoader';
 import ManageAddresses from './pages/ManageAddresses';
 import PaymentMethods from './pages/PaymentMethods';
 import PrivacyTerms from './pages/PrivacyTerms';
+import DeleteAccount from './pages/DeleteAccount';
 import NotFound from './pages/NotFound';
 
 // ─── Lazy-loaded heavy pages for performance ──────────────────────────────────
@@ -110,8 +111,12 @@ export default function App() {
             <Route path="/user-onboarding" element={<ProtectedRoute skipProfileCheck><UserOnboarding /></ProtectedRoute>} />
             <Route path="/verification-pending" element={<ProtectedRoute skipProfileCheck><VerificationPending /></ProtectedRoute>} />
             
-            {/* Public page — privacy/terms (accessible without auth) */}
+            {/* Legal / Policy Routes */}
             <Route path="/privacy" element={<PrivacyTerms />} />
+            <Route path="/privacy-policy" element={<PrivacyTerms />} />
+            <Route path="/terms-and-conditions" element={<PrivacyTerms />} />
+            <Route path="/refund-policy" element={<PrivacyTerms />} />
+            <Route path="/delete-account" element={<DeleteAccount />} />
 
             {/* Protected App Routes — all inside Layout */}
             <Route element={<Layout />}>

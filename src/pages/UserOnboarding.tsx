@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { UserCircle, MapPin, Mail, Camera, ChevronRight, Loader2, Sparkles } from 'lucide-react';
+import { UserCircle, MapPin, ChevronRight, Loader2, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function UserOnboarding() {
@@ -18,11 +17,7 @@ export default function UserOnboarding() {
   const [formData, setFormData] = useState({
     name: user?.name || '',
     address: user?.address || '',
-    email: user?.email || '',
   });
-
-  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
-  const [profilePreview, setProfilePreview] = useState<string | null>(null);
 
   // If already complete, redirect
   useEffect(() => {
@@ -30,14 +25,6 @@ export default function UserOnboarding() {
       navigate('/');
     }
   }, [user, navigate]);
-
-  const handleFileSelect = (file: File | null) => {
-    if (!file) return;
-    setProfilePhoto(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setProfilePreview(reader.result as string);
-    reader.readAsDataURL(file);
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,19 +41,9 @@ export default function UserOnboarding() {
 
     setLoading(true);
     try {
-      let photoUrl: string | undefined;
-
-      if (profilePhoto && user) {
-        const fileRef = ref(storage, `users/${user.uid}/profile.jpg`);
-        await uploadBytes(fileRef, profilePhoto);
-        photoUrl = await getDownloadURL(fileRef);
-      }
-
       await updateDoc(doc(db, 'users', user!.uid), {
         name: formData.name.trim(),
         address: formData.address.trim(),
-        ...(formData.email.trim() ? { email: formData.email.trim() } : {}),
-        ...(photoUrl ? { profilePhotoUrl: photoUrl } : {}),
         profileComplete: true,
       });
 
@@ -190,50 +167,7 @@ export default function UserOnboarding() {
               />
             </div>
 
-            {/* Email (Optional) */}
-            <div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2.5">
-                <Mail className="w-4 h-4" />
-                Email <span className="text-gray-300 normal-case font-normal">(optional)</span>
-              </label>
-              <input
-                type="email"
-                placeholder="your@email.com"
-                className="w-full px-4 py-3.5 text-base font-semibold text-gray-900 bg-gray-50 rounded-xl border-2 border-gray-200 outline-none transition-all duration-200 focus:border-[#8B0000] focus:ring-4 focus:ring-[#8B0000]/10 placeholder:text-gray-300 placeholder:font-normal"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              />
-            </div>
 
-            {/* Profile Photo (Optional) */}
-            <div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2.5">
-                <Camera className="w-4 h-4" />
-                Profile Photo <span className="text-gray-300 normal-case font-normal">(optional)</span>
-              </label>
-              <label className={`w-full flex items-center justify-center p-5 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200 ${
-                profilePreview 
-                  ? 'border-green-300 bg-green-50/50' 
-                  : 'border-gray-300 hover:border-[#8B0000]/40 hover:bg-[#8B0000]/[0.02]'
-              }`}>
-                {profilePreview ? (
-                  <div className="flex items-center gap-3">
-                    <img src={profilePreview} alt="Profile" className="w-14 h-14 rounded-full object-cover border-2 border-green-400" />
-                    <div>
-                      <p className="text-green-700 font-bold text-sm">Photo selected</p>
-                      <p className="text-green-500 text-xs">Tap to change</p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-1.5 text-gray-400">
-                    <Camera className="w-7 h-7" />
-                    <span className="text-sm font-medium">Tap to upload</span>
-                  </div>
-                )}
-                <input type="file" accept="image/*" className="hidden"
-                  onChange={e => handleFileSelect(e.target.files?.[0] || null)} />
-              </label>
-            </div>
           </div>
 
           {/* Error */}

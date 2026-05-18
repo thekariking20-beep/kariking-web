@@ -6,6 +6,7 @@ import { cn } from '../lib/utils';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { CoinTransaction, Referral } from '../types';
+import { COIN_VALUE } from '../config/coins';
 import { Link } from 'react-router-dom';
 
 export default function Referral() {
@@ -102,8 +103,8 @@ export default function Referral() {
   const lockedCoins = user?.lockedCoins || 0;
 
   const stats = [
-    { icon: Coins, label: 'Available Coins', value: `₹${coins * 20}`, subValue: `${coins} coins`, color: 'text-green-600', bg: 'bg-green-50' },
-    { icon: Lock, label: 'Locked Coins', value: `₹${lockedCoins * 20}`, subValue: `${lockedCoins} pending coins`, color: 'text-yellow-600', bg: 'bg-yellow-50' },
+    { icon: Coins, label: 'Available Coins', value: `₹${coins * COIN_VALUE}`, subValue: `${coins} coins`, color: 'text-green-600', bg: 'bg-green-50' },
+    { icon: Lock, label: 'Locked Coins', value: `₹${lockedCoins * COIN_VALUE}`, subValue: `${lockedCoins} pending coins`, color: 'text-yellow-600', bg: 'bg-yellow-50' },
     { icon: Users, label: 'Total Referrals', value: referrals.length, subValue: 'Invited friends', color: 'text-blue-600', bg: 'bg-blue-50' },
   ];
 

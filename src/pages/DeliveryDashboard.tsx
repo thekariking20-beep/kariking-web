@@ -6,7 +6,6 @@ import {
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
-import { processReferralReward } from '../lib/referralReward';
 import {
   Package, MapPin, Phone, Truck, CheckCircle2, Navigation,
   User, Zap, LogOut, ShoppingBag, Box, WifiOff, Wifi, PhoneCall, PartyPopper
@@ -14,6 +13,7 @@ import {
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const isToday = (iso: string) => {
@@ -131,12 +131,8 @@ export default function DeliveryDashboard() {
         ...extra
       });
 
-      // Trigger referral reward check when order is delivered
-      if (newStatus === 'Delivered' && order.userId) {
-        processReferralReward(order.userId, order.id).catch(err => 
-          console.error('Referral reward check failed:', err)
-        );
-      }
+      // Referral reward is handled SERVER-SIDE by the onOrderStatusChange Cloud Function.
+      // Do NOT call processReferralReward() here — it creates a race condition.
     } catch (e) {
       console.error(e);
       setErrorToast("Failed to update order. Check internet.");
@@ -417,23 +413,22 @@ export default function DeliveryDashboard() {
                     </div>
                   </div>
 
-                  {/* Quick action buttons (Call / Map) */}
-                  <div className="grid grid-cols-2 gap-3 mt-4">
-                    <a
-                      href={`tel:${order.phone}`}
-                      className="bg-blue-50 text-blue-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors active:scale-95 border border-blue-100/50"
-                    >
-                      <PhoneCall className="w-4 h-4" /> <span className="text-sm">Call</span>
-                    </a>
-                    <a
-                      href={`https://maps.google.com/?q=${encodeURIComponent(order.address)}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="bg-gray-50 text-gray-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors active:scale-95 border border-gray-100"
-                    >
-                      <Navigation className="w-4 h-4" /> <span className="text-sm">Maps</span>
-                    </a>
-                  </div>
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                      <a
+                        href={`tel:${order.phone}`}
+                        className="bg-blue-50 text-blue-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors active:scale-95 border border-blue-100/50"
+                      >
+                        <PhoneCall className="w-4 h-4" /> <span className="text-sm">Call</span>
+                      </a>
+                      <a
+                        href={Capacitor.isNativePlatform() ? `geo:0,0?q=${encodeURIComponent(order.address)}` : `https://maps.google.com/?q=${encodeURIComponent(order.address)}`}
+                        target={Capacitor.isNativePlatform() ? "_self" : "_blank"}
+                        rel="noreferrer"
+                        className="bg-gray-50 text-gray-700 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors active:scale-95 border border-gray-100"
+                      >
+                        <Navigation className="w-4 h-4" /> <span className="text-sm">Maps</span>
+                      </a>
+                    </div>
 
                   {/* ── PRIMARY DELIVERY ACTION BUTTONS ── */}
                   {tab === 'active' && (

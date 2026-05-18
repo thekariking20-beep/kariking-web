@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, MapPin, Bell, CreditCard, Gift, ClipboardList,
-  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Check
+  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Check, Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../firebase';
 import { cn } from '../lib/utils';
+import ImageUploadDropzone from '../components/ImageUploadDropzone';
 
 interface StatCard {
   icon: React.ElementType;
@@ -55,6 +57,10 @@ export default function Profile() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState('');
   const [editGender, setEditGender] = useState('');
+
+  // Delete Account States
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   // Real-time Order Count
   useEffect(() => {
@@ -105,6 +111,22 @@ export default function Profile() {
     setShowEditModal(false);
   };
 
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    setDeletingAccount(true);
+    try {
+      const deleteFn = httpsCallable(functions, 'deleteUserAccount');
+      await deleteFn();
+      // On success, Firebase Auth invalidates the session, triggering the auth listener to log out
+      window.location.href = '/login'; 
+    } catch (e: any) {
+      console.error(e);
+      alert('Failed to delete account: ' + (e.message || e));
+      setDeletingAccount(false);
+      setShowDeleteModal(false);
+    }
+  };
+
   if (!user) {
     navigate('/login');
     return null;
@@ -141,9 +163,15 @@ export default function Profile() {
       title: 'Support',
       items: [
         { icon: Phone, label: 'Help & Support', desc: 'Chat with us on WhatsApp', action: () => window.open('https://wa.me/916380886374?text=Hi%20Kari%20King%20Support!', '_blank') },
-        { icon: Shield, label: 'Privacy & Terms', desc: 'Read our policies', action: () => navigate('/privacy') },
+        { icon: Shield, label: 'Privacy & Terms', desc: 'Read our policies', action: () => navigate('/privacy-policy') },
       ]
     },
+    {
+      title: 'Danger Zone',
+      items: [
+        { icon: Trash2, label: 'Delete My Account', desc: 'Permanently delete your data', action: () => setShowDeleteModal(true), danger: true },
+      ]
+    }
   ];
 
   return (
@@ -219,18 +247,18 @@ export default function Profile() {
             {section.items.map((item) => (
               <motion.button
                 key={item.label}
-                whileTap={{ scale: 0.98, backgroundColor: 'rgba(139,0,0,0.03)' }}
+                whileTap={{ scale: 0.98, backgroundColor: item.danger ? 'rgba(239,68,68,0.05)' : 'rgba(139,0,0,0.03)' }}
                 onClick={item.action}
-                className="flex items-center gap-3.5 px-4 py-3.5 w-full text-left transition-colors hover:bg-gray-50/80 group"
+                className={cn("flex items-center gap-3.5 px-4 py-3.5 w-full text-left transition-colors group", item.danger ? "hover:bg-red-50/50" : "hover:bg-gray-50/80")}
               >
-                <div className="w-9 h-9 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 group-hover:bg-red-50 transition-colors">
-                  <item.icon className="w-4.5 h-4.5 text-gray-400 group-hover:text-[#8B0000] transition-colors" />
+                <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors", item.danger ? "bg-red-50 group-hover:bg-red-100" : "bg-gray-50 group-hover:bg-red-50")}>
+                  <item.icon className={cn("w-4.5 h-4.5 transition-colors", item.danger ? "text-red-500" : "text-gray-400 group-hover:text-[#8B0000]")} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 leading-tight">{item.label}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">{item.desc}</p>
+                  <p className={cn("text-sm font-bold leading-tight", item.danger ? "text-red-600" : "text-gray-900")}>{item.label}</p>
+                  <p className={cn("text-[11px] mt-0.5 leading-tight", item.danger ? "text-red-400" : "text-gray-400")}>{item.desc}</p>
                 </div>
-                <ChevronRight className="w-4 h-4 text-gray-300 shrink-0 group-hover:text-[#8B0000] transition-colors" />
+                <ChevronRight className={cn("w-4 h-4 shrink-0 transition-colors", item.danger ? "text-red-300 group-hover:text-red-500" : "text-gray-300 group-hover:text-[#8B0000]")} />
               </motion.button>
             ))}
           </div>
@@ -335,6 +363,61 @@ export default function Profile() {
               >
                 Save Changes
               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ─── DELETE ACCOUNT MODAL ───────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDeleteModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl relative"
+            >
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-600" />
+              </div>
+              
+              <h2 className="text-xl font-black text-gray-900 mb-2 text-center">Delete Account?</h2>
+              
+              <div className="bg-red-50 rounded-xl p-4 mb-6 border border-red-100">
+                <p className="text-sm text-red-800 font-bold mb-2">This action cannot be undone. You will lose:</p>
+                <ul className="list-disc pl-5 text-sm text-red-700 space-y-1">
+                  <li>Your profile and saved addresses</li>
+                  <li>All your Kari Coins ({user.coins || 0} coins)</li>
+                  <li>Referral benefits and rewards</li>
+                </ul>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={handleDeleteAccount}
+                  disabled={deletingAccount}
+                  className="w-full bg-red-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-red-600/20 disabled:opacity-50 flex justify-center items-center gap-2"
+                >
+                  {deletingAccount ? (
+                    <>Deleting...</>
+                  ) : (
+                    <>Yes, Delete My Account</>
+                  )}
+                </button>
+                <button 
+                  onClick={() => setShowDeleteModal(false)}
+                  disabled={deletingAccount}
+                  className="w-full bg-gray-100 text-gray-700 font-bold py-4 rounded-xl hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

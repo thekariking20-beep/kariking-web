@@ -1,4 +1,4 @@
-const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onDocumentUpdated, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -173,8 +173,8 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
   if (after.status === "Delivered") {
 
     // 5. Check if we need to unlock referral coins (first order delivered)
-    // PATCH 3: Server-side referral handler now writes audit logs to coinTransactions.
-    // Server SDK bypasses Firestore rules, so writes always succeed.
+    // Server-side only — client-side processReferralReward() has been removed
+    // to prevent race conditions. Server SDK bypasses Firestore rules.
     try {
       const userRef = db.doc(`users/${after.userId}`);
       const userDoc = await userRef.get();
@@ -195,18 +195,50 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               const referrerDoc = referrersQuery.docs[0];
               const now = new Date().toISOString();
 
+              // ── Double Coins: Check for active reward campaign ──────────
+              let multiplier = 1;
+              let campaignId = null;
+              try {
+                const campaignsQuery = await db.collection('rewardCampaigns').where('isActive', '==', true).get();
+                if (!campaignsQuery.empty) {
+                  const nowMs = Date.now();
+                  for (const campDoc of campaignsQuery.docs) {
+                    const camp = campDoc.data();
+                    const starts = new Date(camp.startsAt).getTime();
+                    const ends = new Date(camp.endsAt).getTime();
+                    if (nowMs >= starts && nowMs <= ends) {
+                      multiplier = camp.multiplier || 1;
+                      campaignId = campDoc.id;
+                      break;
+                    }
+                  }
+                }
+              } catch (campErr) {
+                console.warn("Campaign check failed (non-blocking):", campErr);
+              }
+
+              const REFERRER_REWARD = 5 * multiplier;
+              const REFERRED_REWARD = 2 * multiplier;
+
               // Convert lockedCoins to coins (safe: never go below 0)
-              const currentLocked = referrerDoc.data().lockedCoins || 0;
-              const safeDecrement = Math.min(5, currentLocked);
+              const referrerData = referrerDoc.data();
+              const currentLocked = referrerData.lockedCoins || 0;
+              const safeDecrement = Math.min(5, currentLocked); // unlock base 5 locked coins
+              const referrerNewBalance = (referrerData.coins || 0) + REFERRER_REWARD;
+
               await referrerDoc.ref.update({
-                coins: FieldValue.increment(5),
-                lockedCoins: FieldValue.increment(-safeDecrement)
+                coins: FieldValue.increment(REFERRER_REWARD),
+                lockedCoins: FieldValue.increment(-safeDecrement),
+                totalCoinsEarned: FieldValue.increment(REFERRER_REWARD),
+                totalReferralRewards: FieldValue.increment(REFERRER_REWARD),
               });
 
               // Reward referred user + set duplicate guard
+              const referredNewBalance = (userData.coins || 0) + REFERRED_REWARD;
               await userRef.update({
-                coins: FieldValue.increment(2),
+                coins: FieldValue.increment(REFERRED_REWARD),
                 referredRewardGiven: true,
+                totalCoinsEarned: FieldValue.increment(REFERRED_REWARD),
               });
 
               // Mark referral as completed
@@ -223,47 +255,105 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
                   rewardGiven: true,
                   completedAt: now,
                   completedOrderId: orderId,
+                  multiplierApplied: multiplier,
+                  referrerReward: REFERRER_REWARD,
+                  referredReward: REFERRED_REWARD,
                 });
               }
 
-              // PATCH 3: Write audit logs to coinTransactions (server SDK bypasses rules)
-              await Promise.allSettled([
+              // Write audit logs to coinTransactions (server SDK bypasses rules)
+              await Promise.all([
                 db.collection("coinTransactions").add({
                   userId: referrerDoc.id,
-                  amount: 5,
+                  amount: REFERRER_REWARD,
                   type: "earning",
-                  source: `Referral reward — ${userData.phone || after.userId} completed first order`,
+                  source: multiplier > 1
+                    ? `Referral reward (${multiplier}x) — ${userData.phone || after.userId} completed first order`
+                    : `Referral reward — ${userData.phone || after.userId} completed first order`,
                   referralId: referralId,
+                  orderId: orderId,
+                  multiplierApplied: multiplier,
+                  campaignId: campaignId,
+                  balanceAfter: referrerNewBalance,
                   createdAt: now,
                 }),
                 db.collection("coinTransactions").add({
                   userId: after.userId,
-                  amount: 2,
+                  amount: REFERRED_REWARD,
                   type: "earning",
-                  source: "Welcome bonus — first order completed!",
+                  source: multiplier > 1
+                    ? `Welcome bonus (${multiplier}x) — first order completed!`
+                    : "Welcome bonus — first order completed!",
                   referralId: referralId,
+                  orderId: orderId,
+                  multiplierApplied: multiplier,
+                  campaignId: campaignId,
+                  balanceAfter: referredNewBalance,
                   createdAt: now,
                 }),
               ]);
 
               // Notify Referrer
-              const refToken = referrerDoc.data().fcmToken;
+              const refToken = referrerData.fcmToken;
               if (refToken) {
                 await getMessaging().send({
                   token: refToken,
                   notification: {
-                    title: "🎁 Referral Bonus Unlocked!",
-                    body: `Your friend received their first order! You earned 5 coins.`,
+                    title: multiplier > 1 ? `🎁 ${multiplier}x Referral Bonus Unlocked!` : "🎁 Referral Bonus Unlocked!",
+                    body: multiplier > 1
+                      ? `Your friend completed their first order! You earned ${REFERRER_REWARD} coins (${multiplier}x event active!)`
+                      : `Your friend received their first order! You earned 5 coins.`,
                   }
                 }).catch(() => {});
               }
-              console.log(`🎁 Referral bonus: referrer=${referrerDoc.id} (+5), referred=${after.userId} (+2), order=${orderId}`);
+              console.log(`🎁 Referral bonus (${multiplier}x): referrer=${referrerDoc.id} (+${REFERRER_REWARD}), referred=${after.userId} (+${REFERRED_REWARD}), order=${orderId}`);
+            } else {
+              console.warn(`⚠️ Referral code "${userData.referredBy}" has no matching user — skipping reward`);
             }
           }
         }
       }
     } catch (err) {
-      console.error("Error processing referral unlock:", err);
+      console.error("Error processing referral unlock:", err.stack || err);
+    }
+  }
+
+  // ─── Coin Restoration on Cancellation ──────────────────────────────────────
+  // If order is cancelled AND coins were already deducted, restore them
+  if (after.status === "Cancelled" && (after.coinsUsed || 0) > 0) {
+    try {
+      // Only restore if coins were actually deducted (non-QR or QR already approved)
+      const wasDeducted = after.paymentMethod !== 'qr' || 
+                          (after.paymentMethod === 'qr' && (after.pendingCoinsDeduction || 0) === 0);
+      
+      if (wasDeducted) {
+        const coinsToRestore = after.coinsUsed;
+        await db.runTransaction(async (transaction) => {
+          const userRef = db.doc(`users/${after.userId}`);
+          const userSnap = await transaction.get(userRef);
+          if (userSnap.exists) {
+            transaction.update(userRef, {
+              coins: FieldValue.increment(coinsToRestore),
+              totalCoinsRedeemed: FieldValue.increment(-coinsToRestore),
+            });
+          }
+        });
+
+        // Audit log
+        await db.collection("rewardTransactions").add({
+          userId: after.userId,
+          orderId: orderId,
+          amount: coinsToRestore,
+          rupeeValue: coinsToRestore * COIN_VALUE,
+          type: "earned",
+          source: `Coins restored — Order #${orderId.slice(-6)} cancelled`,
+          createdAt: new Date().toISOString(),
+        });
+
+        console.log(`🔄 Restored ${coinsToRestore} coins to user ${after.userId} (order ${orderId} cancelled)`);
+      }
+    } catch (err) {
+      console.error("Error restoring coins on cancellation:", err);
     }
   }
 
@@ -537,6 +627,7 @@ exports.createOrder = onCall(async (request) => {
     couponCode: appliedCouponCode || null,
     couponDiscount: couponDiscount,
     discountAmount,
+    totalSavings: discountAmount + ((deliveryFee || 0) === 0 && totalPrice >= 500 ? 40 : 0),
     deliveryCharge: deliveryFee || 0,
     utrNumber: null,
     idempotencyKey: idempotencyKey || null,
@@ -971,4 +1062,311 @@ exports.resetStaffPassword = onCall(async (request) => {
     success: true,
     message: `Password reset for ${staffPhone}. They must change it on next login.`,
   };
+});
+
+// ─── Play Store Account Deletion Flow ──────────────────────────────────────────
+// Deletes Firebase Auth and PII from Firestore, but retains orders for auditing.
+exports.deleteUserAccount = onCall({
+  enforceAppCheck: false,
+}, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "You must be logged in to delete your account.");
+  }
+
+  const uid = request.auth.uid;
+
+  try {
+    // 1. Delete Firestore User Document
+    await db.collection("users").doc(uid).delete();
+
+    // 2. Delete Addresses (if userAddresses subcollection exists, we can delete the parent wrapper document, 
+    // or simply delete the known addresses doc. For Firebase v9 flat structure, some apps use addresses/{uid})
+    try {
+      await db.collection("addresses").doc(uid).delete();
+    } catch (e) {
+      console.warn("Addresses doc not found or failed to delete (safe to ignore):", e);
+    }
+
+    // 3. Delete from Firebase Authentication (this invalidates the current session immediately)
+    await getAuth().deleteUser(uid);
+
+    console.log(`✅ User account deleted for UID: ${uid}`);
+
+    return { success: true, message: "Account deleted successfully." };
+  } catch (error) {
+    console.error("Account deletion failed:", error);
+    throw new HttpsError("internal", "Failed to delete account. Please contact support.");
+  }
+});
+
+// ─── Cloud Function: Notify Admin on New Bulk Booking ─────────────────────────
+exports.onBulkBookingCreated = onDocumentCreated("bulkBookings/{bookingId}", async (event) => {
+  const data = event.data.data();
+  const bookingId = event.params.bookingId;
+
+  console.log(`📦 New bulk booking created: ${bookingId} by ${data.userName}`);
+
+  try {
+    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+    const tokens = [];
+    adminsSnap.forEach((doc) => {
+      const token = doc.data().fcmToken;
+      if (token) tokens.push(token);
+    });
+
+    if (tokens.length > 0) {
+      const typeLabel = data.type === 'function' ? 'Function/Event' : 'Bulk';
+      const messages = tokens.map((token) => ({
+        token,
+        notification: {
+          title: `📋 New ${typeLabel} Booking!`,
+          body: `${data.userName} • ${data.peopleCount} ppl • ${data.quantityRequirement || 'Custom'} • ${new Date(data.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+        },
+        data: {
+          bookingId: bookingId,
+          type: "bulk_booking_new",
+        },
+      }));
+
+      await Promise.all(messages.map((msg) => getMessaging().send(msg)));
+      console.log(`✅ Admin notified of new bulk booking (${tokens.length} admins)`);
+    }
+  } catch (err) {
+    console.error("Error sending bulk booking notification:", err);
+  }
+
+  return null;
+});
+
+// ─── Cloud Function: Notify on Bulk Booking Status Change ─────────────────────
+exports.onBulkBookingStatusChange = onDocumentUpdated("bulkBookings/{bookingId}", async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  const bookingId = event.params.bookingId;
+
+  // Only trigger if status actually changed
+  if (before.status === after.status) return null;
+
+  console.log(`📦 Bulk booking ${bookingId}: ${before.status} → ${after.status}`);
+
+  // 1. Notify the customer about status changes
+  try {
+    const userDoc = await db.doc(`users/${after.userId}`).get();
+    if (userDoc.exists) {
+      const fcmToken = userDoc.data().fcmToken;
+      if (fcmToken) {
+        const statusMessages = {
+          reviewed: { title: "📝 Booking Reviewed", body: `Your booking #${bookingId.slice(-6)} is being reviewed` },
+          awaiting_payment: { title: "💰 Price Quote Ready!", body: `Your booking #${bookingId.slice(-6)}: ₹${(after.quotedPrice || 0).toLocaleString()} quoted. Pay advance to confirm.` },
+          confirmed: { title: "✅ Booking Confirmed!", body: `Your booking #${bookingId.slice(-6)} is confirmed and being prepared` },
+          delivered: { title: "🎉 Order Delivered!", body: `Your bulk order #${bookingId.slice(-6)} has been delivered` },
+          completed: { title: "✔️ Booking Complete", body: `Your booking #${bookingId.slice(-6)} is marked complete. Thank you!` },
+          rejected: { title: "❌ Booking Rejected", body: `Your booking #${bookingId.slice(-6)} could not be fulfilled` },
+          cancelled: { title: "🚫 Booking Cancelled", body: `Your booking #${bookingId.slice(-6)} has been cancelled${after.cancelReason ? ': ' + after.cancelReason : ''}` },
+        };
+
+        const notification = statusMessages[after.status];
+        if (notification) {
+          await getMessaging().send({
+            token: fcmToken,
+            notification,
+            data: {
+              bookingId: bookingId,
+              type: "bulk_booking_update",
+            },
+          });
+          console.log(`✅ Customer notified of bulk booking status change`);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error sending customer bulk booking notification:", err);
+  }
+
+  // 2. Notify admins when customer pays advance (status → confirmed from awaiting_payment)
+  if (after.status === 'confirmed' && before.status === 'awaiting_payment') {
+    try {
+      const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
+      const tokens = [];
+      adminsSnap.forEach((doc) => {
+        const token = doc.data().fcmToken;
+        if (token) tokens.push(token);
+      });
+
+      if (tokens.length > 0) {
+        const messages = tokens.map((token) => ({
+          token,
+          notification: {
+            title: "💰 Advance Payment Received!",
+            body: `${after.userName} paid ₹${(after.advanceAmount || 0).toLocaleString()} for booking #${bookingId.slice(-6)}`,
+          },
+          data: {
+            bookingId: bookingId,
+            type: "bulk_booking_paid",
+          },
+        }));
+
+        await Promise.all(messages.map((msg) => getMessaging().send(msg)));
+        console.log(`✅ Admin notified of advance payment`);
+      }
+    } catch (err) {
+      console.error("Error sending admin payment notification:", err);
+    }
+  }
+
+  return null;
+});
+
+// ─── One-Time Admin Function: Fix Stuck Referrals ─────────────────────────────
+// Scans for pending referrals where the referred user already has a delivered
+// order but never received their reward (due to the previous Firestore rules bug).
+// Call this ONCE from admin to retroactively credit coins.
+exports.fixStuckReferrals = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  // Verify caller is admin
+  const callerDoc = await db.doc(`users/${request.auth.uid}`).get();
+  if (!callerDoc.exists || callerDoc.data().role !== "admin") {
+    throw new HttpsError("permission-denied", "Only admins can run this.");
+  }
+
+  const results = { fixed: 0, skipped: 0, errors: 0, details: [] };
+
+  try {
+    // Find all pending referrals
+    const pendingReferrals = await db.collection("referrals")
+      .where("status", "==", "pending")
+      .get();
+
+    console.log(`🔍 Found ${pendingReferrals.size} pending referrals to check`);
+
+    for (const refDoc of pendingReferrals.docs) {
+      const referral = refDoc.data();
+      const referredUserId = referral.referredUserId;
+      const referrerId = referral.referrerId;
+
+      try {
+        // Check if referred user has a delivered order
+        const deliveredOrders = await db.collection("orders")
+          .where("userId", "==", referredUserId)
+          .where("status", "==", "Delivered")
+          .limit(1)
+          .get();
+
+        if (deliveredOrders.empty) {
+          results.skipped++;
+          results.details.push({ referralId: refDoc.id, status: "skipped", reason: "No delivered order yet" });
+          continue;
+        }
+
+        // Check if reward was already given via the user doc flag
+        const userDoc = await db.doc(`users/${referredUserId}`).get();
+        if (userDoc.exists && userDoc.data().referredRewardGiven) {
+          // Already rewarded — just mark the referral doc as completed
+          await refDoc.ref.update({
+            status: "completed",
+            rewardGiven: true,
+            completedAt: new Date().toISOString(),
+            completedOrderId: deliveredOrders.docs[0].id,
+            fixedBy: "fixStuckReferrals",
+          });
+          results.skipped++;
+          results.details.push({ referralId: refDoc.id, status: "skipped", reason: "Already rewarded (flag was set)" });
+          continue;
+        }
+
+        // This referral needs fixing — credit coins
+        const orderId = deliveredOrders.docs[0].id;
+        const now = new Date().toISOString();
+        const REFERRER_REWARD = 5;
+        const REFERRED_REWARD = 2;
+
+        // Get referrer doc
+        const referrerDoc = await db.doc(`users/${referrerId}`).get();
+        if (!referrerDoc.exists) {
+          results.errors++;
+          results.details.push({ referralId: refDoc.id, status: "error", reason: "Referrer not found" });
+          continue;
+        }
+
+        const referrerData = referrerDoc.data();
+        const referredData = userDoc.exists ? userDoc.data() : {};
+
+        // Credit referrer: unlock locked coins + add reward
+        const currentLocked = referrerData.lockedCoins || 0;
+        const safeDecrement = Math.min(5, currentLocked);
+        await referrerDoc.ref.update({
+          coins: FieldValue.increment(REFERRER_REWARD),
+          lockedCoins: FieldValue.increment(-safeDecrement),
+          totalCoinsEarned: FieldValue.increment(REFERRER_REWARD),
+          totalReferralRewards: FieldValue.increment(REFERRER_REWARD),
+        });
+
+        // Credit referred user
+        await db.doc(`users/${referredUserId}`).update({
+          coins: FieldValue.increment(REFERRED_REWARD),
+          referredRewardGiven: true,
+          totalCoinsEarned: FieldValue.increment(REFERRED_REWARD),
+        });
+
+        // Mark referral as completed
+        await refDoc.ref.update({
+          status: "completed",
+          rewardGiven: true,
+          completedAt: now,
+          completedOrderId: orderId,
+          referrerReward: REFERRER_REWARD,
+          referredReward: REFERRED_REWARD,
+          fixedBy: "fixStuckReferrals",
+        });
+
+        // Write coin transaction logs
+        await Promise.all([
+          db.collection("coinTransactions").add({
+            userId: referrerId,
+            amount: REFERRER_REWARD,
+            type: "earning",
+            source: `Referral reward (retroactive fix) — ${referredData.phone || referredUserId} completed first order`,
+            referralId: refDoc.id,
+            orderId: orderId,
+            balanceAfter: (referrerData.coins || 0) + REFERRER_REWARD,
+            createdAt: now,
+          }),
+          db.collection("coinTransactions").add({
+            userId: referredUserId,
+            amount: REFERRED_REWARD,
+            type: "earning",
+            source: "Welcome bonus (retroactive fix) — first order completed!",
+            referralId: refDoc.id,
+            orderId: orderId,
+            balanceAfter: (referredData.coins || 0) + REFERRED_REWARD,
+            createdAt: now,
+          }),
+        ]);
+
+        results.fixed++;
+        results.details.push({
+          referralId: refDoc.id,
+          status: "fixed",
+          referrer: referrerId,
+          referred: referredUserId,
+          orderId: orderId,
+        });
+
+        console.log(`✅ Fixed referral ${refDoc.id}: referrer=${referrerId} (+${REFERRER_REWARD}), referred=${referredUserId} (+${REFERRED_REWARD})`);
+      } catch (innerErr) {
+        results.errors++;
+        results.details.push({ referralId: refDoc.id, status: "error", reason: innerErr.message });
+        console.error(`❌ Error fixing referral ${refDoc.id}:`, innerErr);
+      }
+    }
+  } catch (err) {
+    console.error("fixStuckReferrals failed:", err);
+    throw new HttpsError("internal", err.message);
+  }
+
+  console.log(`🎁 fixStuckReferrals complete: ${results.fixed} fixed, ${results.skipped} skipped, ${results.errors} errors`);
+  return results;
 });

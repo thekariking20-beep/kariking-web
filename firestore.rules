@@ -46,6 +46,12 @@ service cloud.firestore {
       allow update: if isOwner(userId) &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['coins', 'lockedCoins', 'role', 'usedCoupons']);
 
+      // Referral flow: allow authenticated users to increment lockedCoins + referralCount
+      // on ANOTHER user's doc. This is needed because AuthContext updates the REFERRER's
+      // doc when a new user signs up with a referral code. Only these 2 fields are allowed.
+      allow update: if isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lockedCoins', 'referralCount']);
+
       // Allow creates for new user registration (auth context creates user doc)
       allow create: if isOwner(userId);
 

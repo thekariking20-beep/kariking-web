@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, Shield, FileText, Mail, Phone, MapPin, Clock, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
-type TabType = 'privacy' | 'terms';
+type TabType = 'privacy' | 'terms' | 'refund';
 
 // ─── Collapsible Section ──────────────────────────────────────────────────────
 function Section({ title, number, children, defaultOpen = false }: { 
@@ -47,9 +47,21 @@ function Section({ title, number, children, defaultOpen = false }: {
 export default function PrivacyTerms() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<TabType>(
-    location.hash === '#terms' ? 'terms' : 'privacy'
-  );
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    if (location.pathname === '/terms-and-conditions' || location.hash === '#terms') return 'terms';
+    if (location.pathname === '/refund-policy' || location.hash === '#refund') return 'refund';
+    return 'privacy';
+  });
+
+  useEffect(() => {
+    if (location.pathname === '/terms-and-conditions' || location.hash === '#terms') {
+      setActiveTab('terms');
+    } else if (location.pathname === '/refund-policy' || location.hash === '#refund') {
+      setActiveTab('refund');
+    } else if (location.pathname === '/privacy-policy' || location.pathname === '/privacy') {
+      setActiveTab('privacy');
+    }
+  }, [location]);
 
   return (
     <div className="bg-gray-50 min-h-screen pb-24">
@@ -76,24 +88,35 @@ export default function PrivacyTerms() {
           <button
             onClick={() => setActiveTab('privacy')}
             className={cn(
-              "flex-1 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all",
+              "flex-1 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all",
               activeTab === 'privacy'
                 ? "bg-[#7A0000] text-white shadow-md"
                 : "text-gray-500 hover:bg-gray-50"
             )}
           >
-            <Shield className="w-4 h-4" /> Privacy Policy
+            <Shield className="w-4 h-4" /> <span className="hidden sm:inline">Privacy</span>
           </button>
           <button
             onClick={() => setActiveTab('terms')}
             className={cn(
-              "flex-1 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all",
+              "flex-1 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all",
               activeTab === 'terms'
                 ? "bg-[#7A0000] text-white shadow-md"
                 : "text-gray-500 hover:bg-gray-50"
             )}
           >
-            <FileText className="w-4 h-4" /> Terms & Conditions
+            <FileText className="w-4 h-4" /> <span className="hidden sm:inline">Terms</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('refund')}
+            className={cn(
+              "flex-1 py-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all",
+              activeTab === 'refund'
+                ? "bg-[#7A0000] text-white shadow-md"
+                : "text-gray-500 hover:bg-gray-50"
+            )}
+          >
+            <FileText className="w-4 h-4" /> <span className="hidden sm:inline">Refunds</span>
           </button>
         </div>
 
@@ -311,6 +334,71 @@ export default function PrivacyTerms() {
 
             <Section number="13" title="Changes to Terms">
               <p>Kari King reserves the right to modify these Terms and Conditions at any time. Updated terms will be published on this page. Continued use of the platform after modifications constitutes acceptance of the revised terms.</p>
+            </Section>
+          </motion.div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════
+            REFUND POLICY TAB
+        ══════════════════════════════════════════════════════════════ */}
+        {activeTab === 'refund' && (
+          <motion.div
+            key="refund"
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.25 }}
+            className="space-y-3"
+          >
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-sm text-emerald-800 font-medium leading-relaxed">
+              At <strong>Kari King</strong>, we want to ensure you get exactly what you paid for. Please review our refund policy regarding fresh product deliveries.
+            </div>
+
+            <Section number="1" title="Cancellation Policy" defaultOpen>
+              <p>Since we deliver fresh, perishable meat products, orders can only be cancelled before they are packed or dispatched.</p>
+              <ul className="list-disc pl-5 space-y-1.5 mt-2">
+                <li>If the order is "Pending" or "Confirmed", you can cancel it via the app or support.</li>
+                <li>Once the status changes to "Packed" or "Out for Delivery", the order cannot be cancelled.</li>
+              </ul>
+            </Section>
+
+            <Section number="2" title="Refund Eligibility">
+              <p>Refunds are only processed under the following strict conditions:</p>
+              <ul className="list-disc pl-5 space-y-1.5 mt-2">
+                <li><strong>Wrong Item:</strong> You received a completely different item than what you ordered.</li>
+                <li><strong>Spoiled/Damaged:</strong> The product arrived in a spoiled or damaged condition unfit for consumption.</li>
+                <li><strong>Quantity Discrepancy:</strong> The delivered quantity was significantly less than the ordered weight.</li>
+              </ul>
+            </Section>
+
+            <Section number="3" title="How to Request a Refund">
+              <p>You must raise a refund request within <strong>30 minutes</strong> of delivery to ensure the claim is valid for perishable goods.</p>
+              <ul className="list-disc pl-5 space-y-1.5 mt-2">
+                <li>Contact our support via WhatsApp (+91 6380886374) or email.</li>
+                <li>Provide your Order ID and clear photographic evidence of the issue.</li>
+                <li>Do not discard the item until our team resolves the claim.</li>
+              </ul>
+            </Section>
+
+            <Section number="4" title="Refund Timelines">
+              <p>If your refund request is approved:</p>
+              <ul className="list-disc pl-5 space-y-1.5 mt-2">
+                <li><strong>UPI/Bank Transfer:</strong> Refunds will be credited back to the original payment method within 5-7 business days.</li>
+                <li><strong>Kari Coins:</strong> You may opt to receive the refund instantly as Kari Coins to your wallet for future purchases.</li>
+              </ul>
+            </Section>
+
+            <Section number="5" title="Non-Refundable Scenarios">
+              <p>We do NOT issue refunds if:</p>
+              <ul className="list-disc pl-5 space-y-1.5 mt-2">
+                <li>You simply changed your mind after the order was packed.</li>
+                <li>You provided an incorrect delivery address.</li>
+                <li>You were unavailable to receive the order at the provided address.</li>
+                <li>The complaint is regarding minor weight fluctuations normal to butchering.</li>
+              </ul>
+            </Section>
+
+            <Section number="6" title="Payment Disputes">
+              <p>If your bank account was debited but the order was not successfully placed on the app (failed transaction), please do not place a second order immediately. Contact support with your UTR. Your money will automatically be refunded by your bank within 3-5 business days.</p>
             </Section>
           </motion.div>
         )}

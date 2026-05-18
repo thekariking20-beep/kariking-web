@@ -375,65 +375,65 @@ export default function CategoriesManager() {
               transition={{ delay: idx * 0.03 }}
               className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden"
             >
-              <div className="flex items-center gap-4 p-4">
+              <div className="flex items-start sm:items-center gap-2.5 sm:gap-4 p-3 sm:p-4">
                 {/* Drag handle placeholder */}
-                <div className="text-gray-300">
+                <div className="text-gray-300 mt-2 sm:mt-0 hidden sm:block">
                   <GripVertical className="w-5 h-5" />
                 </div>
                 
                 {/* Icon */}
-                <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${cat.color} flex items-center justify-center text-xl shadow-md shrink-0`}>
+                <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br ${cat.color} flex items-center justify-center text-lg sm:text-xl shadow-md shrink-0`}>
                   {cat.icon}
                 </div>
                 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-gray-900 text-sm">{cat.label}</h3>
-                    <span className="text-[9px] font-bold text-gray-400 bg-gray-50 px-2 py-0.5 rounded border border-gray-100 uppercase tracking-widest">{cat.id}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-0.5">
+                    <h3 className="font-bold text-gray-900 text-sm truncate">{cat.label}</h3>
+                    <span className="text-[9px] font-bold text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100 uppercase tracking-widest shrink-0">{cat.id}</span>
                     {cat.isActive === false && (
-                      <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 uppercase tracking-widest">Disabled</span>
+                      <span className="text-[9px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded border border-orange-100 uppercase tracking-widest shrink-0">Disabled</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
-                    <span>{cat.subCategories.length} sub-categories</span>
-                    <span>•</span>
-                    <span className="capitalize text-gray-500 font-medium">Type: {cat.type || 'other'}</span>
-                    <span>•</span>
-                    <span className="text-gray-500 font-medium">Priority: {cat.orderPriority ?? 999}</span>
+                  <p className="text-[10px] sm:text-xs text-gray-400 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <span className="whitespace-nowrap">{cat.subCategories.length} sub-categories</span>
+                    <span className="text-gray-300 hidden sm:inline">•</span>
+                    <span className="capitalize text-gray-500 font-medium whitespace-nowrap">Type: {cat.type || 'other'}</span>
+                    <span className="text-gray-300 hidden sm:inline">•</span>
+                    <span className="text-gray-500 font-medium whitespace-nowrap">Priority: {cat.orderPriority ?? 999}</span>
                   </p>
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex flex-wrap justify-end sm:flex-nowrap items-center gap-1 sm:gap-1.5 shrink-0 max-w-[80px] sm:max-w-none">
                   <button
                     onClick={() => setExpandedId(expandedId === cat.id ? null : cat.id)}
-                    className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                    className="p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                   >
-                    {expandedId === cat.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    {expandedId === cat.id ? <ChevronUp className="w-4 h-4 sm:w-4 sm:h-4" /> : <ChevronDown className="w-4 h-4 sm:w-4 sm:h-4" />}
                   </button>
                   <button
                     onClick={() => toggleActive(cat)}
-                    className="p-2 rounded-lg transition-colors"
+                    className="p-1.5 sm:p-2 rounded-lg transition-colors"
                     title={cat.isActive !== false ? 'Disable' : 'Enable'}
                   >
                     {cat.isActive !== false 
-                      ? <ToggleRight className="w-5 h-5 text-green-500" />
-                      : <ToggleLeft className="w-5 h-5 text-gray-400" />
+                      ? <ToggleRight className="w-4 h-4 sm:w-5 sm:h-5 text-green-500" />
+                      : <ToggleLeft className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400" />
                     }
                   </button>
-                  <button onClick={() => startEdit(cat)} className="p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
-                    <Edit2 className="w-4 h-4" />
+                  <button onClick={() => startEdit(cat)} className="p-1.5 sm:p-2 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors">
+                    <Edit2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                   <button 
                     onClick={() => handleDelete(cat.id)} 
                     disabled={deletingId === cat.id}
                     className={cn(
-                      'p-2 rounded-lg transition-colors',
+                      'p-1.5 sm:p-2 rounded-lg transition-colors',
                       deletingId === cat.id ? 'text-red-400 bg-red-50 cursor-wait animate-pulse' : 'text-gray-400 hover:text-red-600 hover:bg-red-50'
                     )}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </button>
                 </div>
               </div>

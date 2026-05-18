@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
   RecaptchaVerifier, signInWithPhoneNumber, ConfirmationResult,
   signInWithEmailAndPassword, updatePassword, EmailAuthProvider, reauthenticateWithCredential
@@ -1124,11 +1124,13 @@ export default function Login() {
             </a>
           </div>
 
-          <p className="text-[10px] text-white/20 leading-relaxed font-medium tracking-wide">
-            By continuing, you agree to our{' '}
-            <a href="/privacy#terms" target="_blank" rel="noopener noreferrer" className="text-white/35 hover:text-white/60 underline cursor-pointer transition-colors duration-300">Terms of Service</a>{' '}and{' '}
-            <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-white/35 hover:text-white/60 underline cursor-pointer transition-colors duration-300">Privacy Policy</a>
-          </p>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-2 text-[11px] text-white/30 font-medium tracking-wide">
+            <Link to="/privacy-policy" className="hover:text-white/60 transition-colors duration-300">Privacy Policy</Link>
+            <span className="text-white/10">•</span>
+            <Link to="/terms-and-conditions" className="hover:text-white/60 transition-colors duration-300">Terms & Conditions</Link>
+            <span className="text-white/10">•</span>
+            <Link to="/refund-policy" className="hover:text-white/60 transition-colors duration-300">Refund Policy</Link>
+          </div>
         </div>
 
         {/* Firebase hidden reCAPTCHA */}

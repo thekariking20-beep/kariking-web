@@ -505,12 +505,31 @@ export default function Bookings() {
                         </div>
                         
                         {booking.status === 'awaiting_payment' && (
-                           <div className="bg-orange-50 border border-orange-100 rounded-lg p-2.5 flex items-center gap-2 mb-2">
-                             <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
-                             <p className="text-[10px] font-bold text-orange-800 tracking-wide">
-                               💰 50% advance required to confirm order. The quoted price is binding.
-                             </p>
-                           </div>
+                          <div className="space-y-2 mb-2">
+                            {booking.adminMessage && (
+                              <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-2">
+                                <MessageSquare className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                                <div>
+                                  <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-1">Message from Kari King</p>
+                                  <p className="text-xs font-medium text-blue-800 leading-relaxed">{booking.adminMessage}</p>
+                                </div>
+                              </div>
+                            )}
+                            <div className="bg-orange-50 border border-orange-100 rounded-lg p-2.5 flex items-center gap-2">
+                              <AlertCircle className="w-4 h-4 text-orange-500 shrink-0" />
+                              <p className="text-[10px] font-bold text-orange-800 tracking-wide">
+                                💰 50% advance required to confirm order. The quoted price is binding.
+                              </p>
+                            </div>
+                            <a
+                              href={`https://wa.me/919442735406?text=${encodeURIComponent(`Hi, I have a bulk booking #${booking.id.slice(-6)}. I'd like to discuss and pay the advance of ₹${(booking.advanceAmount || 0).toLocaleString()}.`)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="w-full py-2.5 bg-green-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 shadow-sm"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" /> Contact Us on WhatsApp
+                            </a>
+                          </div>
                         )}
                         {booking.adminNotes && (
                           <div className="mt-3 pt-3 border-t border-gray-100">

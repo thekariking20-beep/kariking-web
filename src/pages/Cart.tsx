@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { COIN_VALUE, COIN_EARN_THRESHOLD, formatCoinUsage } from '../config/coins';
 import { useNavigate, Link } from 'react-router-dom';
 import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone, Tag } from 'lucide-react';
 import type { Order } from '../types';
@@ -73,7 +74,6 @@ export default function Cart() {
 
   const { width, height } = useWindowSize();
 
-  const COIN_VALUE = 20;
   const availableCoins = user?.coins || 0;
   
   const couponDiscount = appliedCoupon?.discount || 0;
@@ -91,6 +91,7 @@ export default function Cart() {
   const deliveryFee = totalPrice >= 500 || totalPrice === 0 ? 0 : 40;
   
   const finalTotal = Math.round((Math.max(0, totalPrice - discountAmount) + deliveryFee) * 100) / 100;
+  const totalSavings = discountAmount + (deliveryFee === 0 && totalPrice >= 500 ? 40 : 0);
   const canPayFullyWithCoins = false; // We enforce minimum payable > 1, so full payment with coins alone is not possible
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
@@ -433,40 +434,40 @@ export default function Cart() {
               initial={{ opacity: 0, x: -20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 20 }}
-              className="premium-card p-4 flex items-center gap-4 group"
+              className="premium-card p-3 sm:p-4 flex items-center gap-2 sm:gap-4 group"
             >
-              <div className="flex-1">
-                <h3 className="font-bold text-gray-900 group-hover:text-[#7A0000] transition-colors">{item.name}</h3>
-                <p className="text-sm font-black text-transparent bg-premium-gradient bg-clip-text">₹{item.sellingPrice}</p>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-bold text-gray-900 group-hover:text-[#7A0000] transition-colors truncate">{item.name}</h3>
+                <p className="text-sm font-black text-transparent bg-premium-gradient bg-clip-text truncate">₹{item.sellingPrice}</p>
               </div>
               
-              <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-2 py-1 shadow-inner border border-gray-100">
+              <div className="flex items-center gap-1 sm:gap-2 bg-gray-50 rounded-lg px-1 sm:px-2 py-1 shadow-inner border border-gray-100 shrink-0">
                 <button
                   onClick={() => updateQuantity(item.productId, item.quantity - (item.stepSize || 1))}
                   className="text-gray-600 hover:bg-white rounded p-1 transition-colors hover:shadow-sm"
                 >
-                  <Minus className="w-4 h-4" />
+                  <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </button>
-                <div className="flex flex-col items-center min-w-[36px]">
-                  <span className="font-black text-gray-900 leading-none mt-1">{formatQty(item.quantity, item.unitType)}</span>
+                <div className="flex flex-col items-center min-w-[28px] sm:min-w-[36px]">
+                  <span className="font-black text-gray-900 text-xs sm:text-sm leading-none mt-1">{formatQty(item.quantity, item.unitType)}</span>
                 </div>
                 <button
                   onClick={() => updateQuantity(item.productId, item.quantity + (item.stepSize || 1))}
                   className="text-gray-600 hover:bg-white rounded p-1 transition-colors hover:shadow-sm"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                 </button>
               </div>
               
-              <div className="text-right min-w-[80px]">
-                <p className="font-black text-gray-900">₹{Math.round((item.quantity / (item.baseWeight || 1)) * item.sellingPrice)}</p>
+              <div className="text-right shrink-0">
+                <p className="font-black text-gray-900 text-sm sm:text-base">₹{Math.round((item.quantity / (item.baseWeight || 1)) * item.sellingPrice)}</p>
               </div>
               
               <button
                 onClick={() => removeFromCart(item.productId)}
-                className="text-gray-400 hover:text-[#7A0000] p-2 transition-colors hover:bg-red-50 rounded-xl"
+                className="text-gray-400 hover:text-[#7A0000] p-1.5 sm:p-2 transition-colors hover:bg-red-50 rounded-xl shrink-0"
               >
-                <Trash2 className="w-5 h-5" />
+                <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
             </motion.div>
           ))}
@@ -522,7 +523,7 @@ export default function Cart() {
                     value={couponInput}
                     onChange={e => { setCouponInput(e.target.value.toUpperCase()); setCouponError(''); }}
                     placeholder="Enter coupon code"
-                    className="flex-1 px-3 py-2.5 border border-gray-200 rounded-lg text-sm font-bold uppercase tracking-wider outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
+                    className="flex-1 min-w-0 px-3 py-2.5 border border-gray-200 rounded-lg text-sm font-bold uppercase tracking-wider outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 bg-white"
                     onKeyDown={e => e.key === 'Enter' && handleApplyCoupon()}
                   />
                   <button
@@ -553,52 +554,97 @@ export default function Cart() {
               )}
             </div>
 
-            {/* ─── Kari Coins Section ──────────────────────────── */}
-            {availableCoins > 0 && (
-              <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-4 rounded-xl space-y-3 border border-amber-100/50">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center shadow-sm">
-                      <Sparkles className="w-3 h-3 text-white" />
-                    </div>
-                    <span className="text-sm font-bold text-gray-700">Use Kari Coins</span>
+            {/* ─── Kari Coins Wallet — Always Visible ─────────── */}
+            <div className={cn(
+              "p-4 rounded-xl space-y-3 border transition-all",
+              useCoins && coinsBeingUsed > 0
+                ? "bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 border-amber-200 shadow-sm"
+                : "bg-gradient-to-r from-gray-50 to-slate-50 border-gray-100"
+            )}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className={cn(
+                    "w-8 h-8 rounded-xl flex items-center justify-center shadow-sm transition-all",
+                    availableCoins > 0
+                      ? "bg-gradient-to-br from-amber-400 to-yellow-500"
+                      : "bg-gradient-to-br from-gray-300 to-gray-400"
+                  )}>
+                    <Coins className="w-4 h-4 text-white" />
                   </div>
-                  <button
-                    onClick={() => setUseCoins(!useCoins)}
-                    className={cn(
-                      "w-10 h-5 rounded-full transition-colors relative",
-                      useCoins ? "bg-gradient-to-r from-amber-400 to-yellow-500 shadow-md" : "bg-gray-300"
-                    )}
-                  >
-                    <div className={cn(
-                      "absolute top-1 w-3 h-3 bg-white rounded-full transition-all shadow-sm",
-                      useCoins ? "right-1" : "left-1"
-                    )} />
-                  </button>
+                  <div>
+                    <span className="text-sm font-bold text-gray-800">Kari Coins</span>
+                    <p className="text-[10px] text-gray-400 leading-tight">1 coin = ₹{COIN_VALUE}</p>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] text-gray-500">
-                    Wallet Coins: <span className="font-bold text-amber-700">{availableCoins}</span> | Value: <span className="font-bold text-amber-700">₹{availableCoins * COIN_VALUE}</span>
-                  </p>
-                  <p className="text-[10px] text-gray-400">1 coin = ₹{COIN_VALUE}</p>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <p className={cn(
+                      "text-lg font-black leading-none",
+                      availableCoins > 0 ? "text-amber-600" : "text-gray-400"
+                    )}>{availableCoins}</p>
+                    <p className="text-[9px] text-gray-400 font-medium">₹{availableCoins * COIN_VALUE} value</p>
+                  </div>
+                  {availableCoins > 0 && maxCoinsToUse > 0 ? (
+                    <button
+                      onClick={() => setUseCoins(!useCoins)}
+                      className={cn(
+                        "w-11 h-6 rounded-full transition-all relative",
+                        useCoins
+                          ? "bg-gradient-to-r from-amber-400 to-yellow-500 shadow-md shadow-amber-200"
+                          : "bg-gray-300 hover:bg-gray-400"
+                      )}
+                    >
+                      <div className={cn(
+                        "absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm",
+                        useCoins ? "right-1" : "left-1"
+                      )} />
+                    </button>
+                  ) : null}
                 </div>
-                {maxCoinsToUse < availableCoins && maxCoinsToUse > 0 && (
-                  <p className="text-[9px] text-amber-600 font-medium">
-                    Max usable: {maxCoinsToUse} coins (to keep payable amount above ₹0)
+              </div>
+
+              {/* Zero balance — earn info */}
+              {availableCoins === 0 && (
+                <div className="flex items-center gap-2 bg-white/60 rounded-lg p-2.5 border border-gray-100">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <p className="text-[11px] text-gray-500">
+                    Earn coins on orders above <span className="font-bold text-amber-600">₹{COIN_EARN_THRESHOLD}</span>. Refer friends for bonus coins!
                   </p>
-                )}
-                {useCoins && (
+                </div>
+              )}
+
+              {/* Has coins but can't use on this order */}
+              {availableCoins > 0 && maxCoinsToUse === 0 && (
+                <p className="text-[10px] text-amber-600 font-medium bg-amber-50 rounded-lg px-2.5 py-1.5">
+                  ⓘ Coins can be applied on orders with subtotal above ₹{COIN_VALUE + 1} (after coupon)
+                </p>
+              )}
+
+              {/* Max usable hint */}
+              {maxCoinsToUse > 0 && maxCoinsToUse < availableCoins && (
+                <p className="text-[10px] text-amber-600 font-medium">
+                  Max usable: {maxCoinsToUse} coins (₹{maxCoinsToUse * COIN_VALUE} off) — keeps payable above ₹1
+                </p>
+              )}
+
+              {/* Applied coins breakdown */}
+              <AnimatePresence>
+                {useCoins && coinsBeingUsed > 0 && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }} 
                     animate={{ opacity: 1, height: 'auto' }}
-                    className="flex justify-between text-sm font-bold border-t border-amber-200/50 pt-2"
+                    exit={{ opacity: 0, height: 0 }}
+                    className="flex justify-between items-center text-sm font-bold border-t border-amber-200/50 pt-2.5"
                   >
-                    <span className="text-amber-700">Coins Applied ({coinsBeingUsed} coins)</span>
-                    <span className="text-green-600">-₹{coinDiscount}</span>
+                    <span className="text-amber-700 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      {formatCoinUsage(coinsBeingUsed)}
+                    </span>
+                    <span className="text-green-600 font-black">-₹{coinDiscount}</span>
                   </motion.div>
                 )}
-              </div>
-            )}
+              </AnimatePresence>
+            </div>
 
             <div className="flex justify-between items-center text-gray-600">
               <span>Delivery Fee</span>
@@ -609,6 +655,26 @@ export default function Cart() {
               )}
             </div>
 
+            {/* ─── Total Savings Banner ─────────────────────────── */}
+            <AnimatePresence>
+              {totalSavings > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-3.5 py-2.5"
+                >
+                  <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                    <Tag className="w-3 h-3 text-white" />
+                  </div>
+                  <p className="text-xs font-bold text-green-700 flex-1">
+                    You're saving <span className="text-green-800 font-black">₹{totalSavings}</span> on this order!
+                  </p>
+                  <PartyPopper className="w-4 h-4 text-green-500 shrink-0" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* ─── Total Amount — Premium Card ─────────────────── */}
             <div className="relative mt-2 -mx-2 px-5 py-4 rounded-2xl overflow-hidden" style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)' }}>
               <div className="absolute inset-0 opacity-20" style={{ background: 'radial-gradient(circle at 80% 20%, rgba(255,45,45,0.4) 0%, transparent 60%)' }} />
@@ -618,6 +684,9 @@ export default function Cart() {
                   <p className="text-3xl font-black text-white" style={{ textShadow: '0 2px 10px rgba(255,45,45,0.3)' }}>
                     ₹{finalTotal.toFixed(2)}
                   </p>
+                  {discountAmount > 0 && (
+                    <p className="text-[10px] text-gray-500 line-through mt-0.5">₹{(totalPrice + deliveryFee).toFixed(0)}</p>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FF2D2D 0%, #7A0000 100%)', boxShadow: '0 4px 15px rgba(255,45,45,0.4)' }}>
@@ -828,24 +897,24 @@ export default function Cart() {
                 <p className="font-bold text-gray-900 text-sm select-all mt-1">{UPI_ID}</p>
               </div>
 
-              {/* UPI App Buttons — Android intent deep links for reliability */}
+              {/* UPI App Buttons — Direct URI schemes for WebView compatibility */}
               <div className="mb-4 grid grid-cols-4 gap-2">
                 <a
-                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end;`}
+                  href={`tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/gpay.jpeg" alt="GPay" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">GPay</span>
                 </a>
                 <a
-                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=com.phonepe.app;end;`}
+                  href={`phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/phonepe.jpeg" alt="PhonePe" className="h-8 w-8 object-contain rounded-lg" />
                   <span className="text-[9px] font-bold text-gray-600">PhonePe</span>
                 </a>
                 <a
-                  href={`intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order#Intent;scheme=upi;package=net.one97.paytm;end;`}
+                  href={`paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${upiAmount}&cu=INR&tn=KariKing_Order`}
                   className="bg-white border border-gray-200 hover:bg-gray-50 rounded-xl p-2.5 flex flex-col items-center justify-center gap-1.5 shadow-sm transition-colors active:scale-95"
                 >
                   <img src="/paytm.jpeg" alt="Paytm" className="h-8 w-8 object-contain rounded-lg" />

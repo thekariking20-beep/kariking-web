@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit, getDocs, startAfter, DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
-import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap, Home } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -19,7 +19,6 @@ import CouponManager from '../components/admin/CouponManager';
 import RewardCampaignManager from '../components/admin/RewardCampaignManager';
 import { useCategories } from '../context/CategoriesContext';
 import { useNavigate } from 'react-router-dom';
-import { processReferralReward } from '../lib/referralReward';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
@@ -336,12 +335,9 @@ export default function Admin() {
       await updateDoc(doc(db, 'orders', orderId), { status: newStatus, statusHistory, updatedAt: new Date().toISOString() });
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus, statusHistory } : o));
       
-      // Trigger referral reward check when order is delivered
-      if (newStatus === 'Delivered' && order.userId) {
-        processReferralReward(order.userId, orderId).catch(err => 
-          console.error('Referral reward check failed:', err)
-        );
-      }
+      // Referral reward is handled SERVER-SIDE by the onOrderStatusChange Cloud Function.
+      // Do NOT call processReferralReward() here — it creates a race condition
+      // where the client wins the transaction but can't write coinTransactions logs.
     } catch(err) {
       console.error(err);
     }
@@ -439,6 +435,17 @@ export default function Admin() {
               </button>
             );
           })}
+
+          {/* Back to App Homepage */}
+          <div className="mt-2 pt-2 border-t border-white/[0.06]">
+            <button
+              onClick={() => { navigate('/'); setMobileSidebarOpen(false); }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 group text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+            >
+              <Home className="w-5 h-5 shrink-0 text-emerald-500 group-hover:text-emerald-400" />
+              <span className="truncate">Back to App</span>
+            </button>
+          </div>
         </nav>
 
         {/* ─── Admin Profile Footer ─── */}
@@ -844,9 +851,10 @@ export default function Admin() {
                   </AnimatePresence>
 
                   <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-100">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100">
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Product</th>
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Status</th>
                           {isAdmin && <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Actions</th>}
@@ -910,6 +918,7 @@ export default function Admin() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 </div>
               )}
@@ -958,9 +967,10 @@ export default function Admin() {
                     </div>
                   )}
                   <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-100">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100">
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Phone / UID</th>
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-center">Coins (Available / Locked)</th>
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest text-right">Role</th>
@@ -1001,6 +1011,7 @@ export default function Admin() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                     <div className="border-t border-gray-100 px-4 py-3 text-xs text-gray-400 font-medium flex items-center justify-between">
                       <span>Showing {uniqueUsers.length} unique users {totalDuplicates > 0 ? `(${totalDuplicates} duplicates hidden)` : ''}</span>
                       {hasMoreUsers && (
@@ -1041,6 +1052,35 @@ export default function Admin() {
                     </div>
                   </div>
 
+                  {/* Fix Stuck Referrals (one-time admin action) */}
+                  {referrals.filter(r => r.status === 'pending').length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-amber-800">⚠️ {referrals.filter(r => r.status === 'pending').length} pending referrals found</p>
+                        <p className="text-xs text-amber-600 mt-0.5">Click "Fix Now" to retroactively credit coins for referred users who already have a delivered order.</p>
+                      </div>
+                      <button 
+                        onClick={async () => {
+                          if (!window.confirm('This will retroactively credit coins for all pending referrals where the referred user has already completed their first order. Continue?')) return;
+                          try {
+                            const { httpsCallable } = await import('firebase/functions');
+                            const { functions } = await import('../firebase');
+                            const fixFn = httpsCallable(functions, 'fixStuckReferrals');
+                            const result = await fixFn({});
+                            const data = result.data as any;
+                            alert(`✅ Done!\n\nFixed: ${data.fixed}\nSkipped: ${data.skipped}\nErrors: ${data.errors}`);
+                          } catch (err: any) {
+                            alert(`❌ Failed: ${err.message}`);
+                            console.error('fixStuckReferrals error:', err);
+                          }
+                        }}
+                        className="px-5 py-2.5 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 transition-colors shrink-0 shadow-sm"
+                      >
+                        🔧 Fix Now
+                      </button>
+                    </div>
+                  )}
+
                   {/* Search & Filter */}
                   <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col sm:flex-row gap-3">
                     <input
@@ -1076,9 +1116,10 @@ export default function Admin() {
 
                   {/* Referrals Table */}
                   <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-gray-100">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse min-w-[800px]">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-100">
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Referrer</th>
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Friend (Phone)</th>
                           <th className="p-4 text-xs font-bold text-gray-400 uppercase tracking-widest">Date</th>
@@ -1129,6 +1170,7 @@ export default function Admin() {
                         })}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 </div>
               )}

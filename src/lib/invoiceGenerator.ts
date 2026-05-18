@@ -2,11 +2,12 @@
 // This removes ~620KB from the initial bundle load.
 import { Order } from '../types';
 import { STORE_CONFIG } from '../config/storeConfig';
+import { COIN_VALUE } from '../config/coins';
 import { doc as fbDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-const COIN_VALUE = 20;
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 // ─── Invoice ID Generator ────────────────────────────────────────────────────
 function generateInvoiceId(orderId: string): string {
@@ -322,9 +323,10 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   // Coin Discount
   if (order.coinsUsed > 0) {
     doc.setTextColor(...grayText);
-    doc.text(`Kari Coins (${order.coinsUsed} coins)`, sumLabelX, y);
+    doc.text(`Kari Coins (${order.coinsUsed} coin${order.coinsUsed > 1 ? 's' : ''})`, sumLabelX, y);
     doc.setTextColor(...greenText);
-    doc.text(`-${fmtAmt(order.coinsUsed * COIN_VALUE)}`, sumValX, y, { align: 'right' });
+    const coinDiscountAmt = order.coinDiscountAmount || order.coinsUsed * COIN_VALUE;
+    doc.text(`-${fmtAmt(coinDiscountAmt)}`, sumValX, y, { align: 'right' });
     y += 6;
   }
 
@@ -335,6 +337,22 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.setTextColor(...darkText);
   doc.text(deliveryCharge === 0 ? 'FREE' : fmtAmt(deliveryCharge), sumValX, y, { align: 'right' });
   y += 5;
+
+  // ─── Total Savings Row ─────────────────────────────────────────────────
+  const totalSavings = (order.couponDiscount || 0)
+    + ((order.coinDiscountAmount || order.coinsUsed * COIN_VALUE) || 0)
+    + (deliveryCharge === 0 && order.totalAmount >= 500 ? 40 : 0);
+  
+  if (totalSavings > 0) {
+    doc.setFillColor(230, 252, 237);
+    doc.roundedRect(sumLabelX - 5, y - 2, pageWidth - margin - sumLabelX + 8, 9, 1.5, 1.5, 'F');
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(22, 163, 74);
+    doc.text('TOTAL SAVINGS', sumLabelX, y + 4);
+    doc.text(fmtAmt(totalSavings), sumValX, y + 4, { align: 'right' });
+    y += 12;
+  }
 
   // ─── Grand Total Box ──────────────────────────────────────────────────
   doc.setDrawColor(200, 200, 200);
@@ -398,7 +416,27 @@ export async function downloadInvoice(order: Order, customerName?: string) {
     const pdfDoc = await generateInvoicePDF(order, name);
     const invoiceId = generateInvoiceId(order.id);
     const filename = `Kari_King_Invoice_${invoiceId}.pdf`;
-    pdfDoc.save(filename);
+
+    if (Capacitor.isNativePlatform()) {
+      // Native Android/iOS: Write to filesystem and trigger Share sheet
+      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1];
+      
+      const savedFile = await Filesystem.writeFile({
+        path: filename,
+        data: pdfBase64,
+        directory: Directory.Cache,
+      });
+      
+      await Share.share({
+        title: 'Order Invoice',
+        text: `Invoice for Order #${order.id.slice(-6)}`,
+        url: savedFile.uri,
+        dialogTitle: 'Save or View Invoice'
+      });
+    } else {
+      // Standard Web Behavior
+      pdfDoc.save(filename);
+    }
   } catch (err) {
     console.error('[Invoice] PDF generation failed:', err);
     alert('Failed to generate invoice. Please try again.');

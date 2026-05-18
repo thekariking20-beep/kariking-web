@@ -5,9 +5,13 @@
  * Checks if this is the user's FIRST completed order.
  * If yes, and they have a pending referral → complete the referral and reward both parties.
  * 
- * Reward structure:
+ * Reward structure (base):
  *   Referrer:  lockedCoins → coins (unlock 5 coins = ₹100)
  *   Referred:  coins += 2 (welcome bonus)
+ * 
+ * Double Coins:
+ *   If a reward campaign is active, the multiplier is applied to both rewards.
+ *   e.g. 2x event → Referrer gets 10 coins, Referred gets 4 coins.
  * 
  * Fraud prevention (5 layers):
  *   1. referral.rewardGiven flag — prevents double-rewarding on referral doc
@@ -18,13 +22,35 @@
  */
 
 import {
-  collection, query, where, getDocs, doc, increment, addDoc, orderBy, limit,
+  collection, query, where, getDocs, doc, increment, orderBy, limit,
   runTransaction, getDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
 
-const REFERRER_COIN_REWARD = 5;     // 5 coins = ₹100
-const REFERRED_COIN_REWARD = 2;     // 2 coins = ₹40 (welcome bonus)
+const BASE_REFERRER_REWARD = 5;     // 5 coins = ₹100
+const BASE_REFERRED_REWARD = 2;     // 2 coins = ₹40 (welcome bonus)
+
+/**
+ * Check for an active reward campaign and return the multiplier.
+ */
+async function getActiveMultiplier(): Promise<{ multiplier: number; campaignId: string | null }> {
+  try {
+    const q = query(collection(db, 'rewardCampaigns'), where('isActive', '==', true));
+    const snap = await getDocs(q);
+    if (snap.empty) return { multiplier: 1, campaignId: null };
+
+    const now = Date.now();
+    for (const d of snap.docs) {
+      const camp = d.data();
+      const starts = new Date(camp.startsAt).getTime();
+      const ends = new Date(camp.endsAt).getTime();
+      if (now >= starts && now <= ends) {
+        return { multiplier: camp.multiplier || 1, campaignId: d.id };
+      }
+    }
+  } catch { /* non-blocking */ }
+  return { multiplier: 1, campaignId: null };
+}
 
 export async function processReferralReward(userId: string, orderId: string): Promise<void> {
   try {
@@ -60,6 +86,11 @@ export async function processReferralReward(userId: string, orderId: string): Pr
     const ordersSnap = await getDocs(ordersQuery);
     if (ordersSnap.size > 1) return; // Not first order — skip
 
+    // ─── Check for active reward campaign (double coins) ──────────────
+    const { multiplier } = await getActiveMultiplier();
+    const REFERRER_COIN_REWARD = BASE_REFERRER_REWARD * multiplier;
+    const REFERRED_COIN_REWARD = BASE_REFERRED_REWARD * multiplier;
+
     // ─── ALL GATES PASSED → Award via Transaction ─────────────────────
     const referrerId = referral.referrerId;
     const referralRef = doc(db, 'referrals', referralDocSnap.id);
@@ -84,15 +115,17 @@ export async function processReferralReward(userId: string, orderId: string): Pr
         rewardGiven: true,
         completedAt: now,
         completedOrderId: orderId,
+        multiplierApplied: multiplier,
       });
 
       // 2. Reward referrer: unlock lockedCoins → coins
       if (referrerSnap.exists()) {
         const currentLocked = referrerSnap.data().lockedCoins || 0;
-        const safeDecrement = Math.min(REFERRER_COIN_REWARD, currentLocked);
+        const safeDecrement = Math.min(BASE_REFERRER_REWARD, currentLocked);
         transaction.update(referrerRef, {
           coins: increment(REFERRER_COIN_REWARD),
           lockedCoins: increment(-safeDecrement),
+          totalCoinsEarned: increment(REFERRER_COIN_REWARD),
         });
       }
 
@@ -100,15 +133,26 @@ export async function processReferralReward(userId: string, orderId: string): Pr
       transaction.update(userRef, {
         coins: increment(REFERRED_COIN_REWARD),
         referredRewardGiven: true,
+        totalCoinsEarned: increment(REFERRED_COIN_REWARD),
       });
     });
 
     // Audit logs are now written server-side in onOrderStatusChange (Cloud Function)
     // Server SDK bypasses Firestore rules, ensuring logs always persist.
 
-    console.log(`✅ Referral reward processed: referrer=${referrerId}, referred=${userId}`);
+    console.log(`✅ Referral reward processed (${multiplier}x): referrer=${referrerId} (+${REFERRER_COIN_REWARD}), referred=${userId} (+${REFERRED_COIN_REWARD})`);
   } catch (error) {
     console.error('Referral reward processing failed:', error);
     // Non-blocking — don't crash the order flow
   }
+}
+
+// ─── Customer Name Resolver (async — call BEFORE download) ───────────────────
+export async function resolveCustomerName(userId: string): Promise<string> {
+  if (!userId) return 'Customer';
+  try {
+    const userSnap = await getDoc(doc(db, 'users', userId));
+    if (userSnap.exists()) return userSnap.data().name || 'Customer';
+  } catch { /* ignore */ }
+  return 'Customer';
 }

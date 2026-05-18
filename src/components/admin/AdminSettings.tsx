@@ -238,7 +238,7 @@ export default function AdminSettings() {
             className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-gray-100"
           >
             {/* -- HEADER -- */}
-            <div className="mb-8 border-b border-gray-100 pb-6 flex items-center justify-between">
+            <div className="mb-8 border-b border-gray-100 pb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-black text-gray-900">{tabs.find(t => t.id === activeTab)?.label}</h2>
                 <p className="text-sm text-gray-500 font-medium mt-1">Manage your {tabs.find(t => t.id === activeTab)?.label.toLowerCase()} here.</p>
@@ -247,7 +247,7 @@ export default function AdminSettings() {
                 <button
                   onClick={saveSettings}
                   disabled={saving}
-                  className="px-6 py-3 bg-gray-900 hover:bg-black text-white font-bold rounded-xl shadow-lg shadow-gray-900/20 transition-all flex items-center gap-2 disabled:opacity-50"
+                  className="shrink-0 px-6 py-3 bg-gray-900 hover:bg-black text-white font-bold rounded-xl shadow-lg shadow-gray-900/20 transition-all flex items-center gap-2 disabled:opacity-50"
                 >
                   {saving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
                   {saving ? 'Saving...' : 'Save Changes'}
@@ -257,7 +257,7 @@ export default function AdminSettings() {
                 <button
                   onClick={saveProfile}
                   disabled={savingProfile}
-                  className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-600/20 transition-all flex items-center gap-2 disabled:opacity-50"
+                  className="shrink-0 px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-600/20 transition-all flex items-center gap-2 disabled:opacity-50"
                 >
                   {savingProfile ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-5 h-5" />}
                   {savingProfile ? 'Saving...' : 'Save Profile'}
@@ -449,7 +449,7 @@ export default function AdminSettings() {
                     <button 
                       onClick={() => setSettings({...settings, delivery: {...settings.delivery, enabled: !settings.delivery.enabled}})}
                       className={cn(
-                        "w-14 h-8 rounded-full flex items-center transition-colors px-1",
+                        "w-14 h-8 rounded-full flex items-center transition-colors px-1 shrink-0",
                         settings.delivery.enabled ? "bg-green-500 justify-end" : "bg-gray-300 justify-start"
                       )}
                     >
@@ -473,11 +473,11 @@ export default function AdminSettings() {
                       <button 
                         onClick={() => setSettings({...settings, delivery: {...settings.delivery, autoAssign: !settings.delivery.autoAssign}})}
                         className={cn(
-                          "w-12 h-6 rounded-full flex items-center transition-colors px-1",
+                          "w-14 h-8 rounded-full flex items-center transition-colors px-1 shrink-0",
                           settings.delivery.autoAssign ? "bg-amber-500 justify-end" : "bg-gray-300 justify-start"
                         )}
                       >
-                        <motion.div layout className="w-4 h-4 bg-white rounded-full shadow-sm" />
+                        <motion.div layout className="w-6 h-6 bg-white rounded-full shadow-sm" />
                       </button>
                     </div>
                  </div>

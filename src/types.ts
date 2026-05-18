@@ -183,6 +183,8 @@ export interface BulkBooking {
   location: string;
   notes?: string;
   adminNotes?: string;
+  adminMessage?: string;       // Customer-facing message from admin (e.g. "We'll contact you shortly")
+  utrNumber?: string;          // UTR from advance payment
 
   // Status
   status: BulkBookingStatus;

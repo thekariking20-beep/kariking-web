@@ -7,7 +7,7 @@ import { cn } from '../../lib/utils';
 import {
   Package, Clock, CheckCircle2, XCircle, CreditCard, ChevronDown,
   ChevronUp, IndianRupee, Calendar, Phone, User, AlertCircle, Check, X,
-  MapPin, Truck, Ban, MessageSquare
+  MapPin, Truck, Ban, MessageSquare, Send
 } from 'lucide-react';
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
@@ -96,6 +96,7 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
   const [editMode, setEditMode] = useState(false);
   const [quotedPrice, setQuotedPrice] = useState(booking.quotedPrice || 0);
   const [adminNotes, setAdminNotes] = useState(booking.adminNotes || '');
+  const [adminMessage, setAdminMessage] = useState(booking.adminMessage || 'We will connect with you shortly to discuss the details. Please pay the advance amount to confirm your order.');
   const [saving, setSaving] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -115,6 +116,7 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
         advanceAmount: advance,
         balanceAmount: quotedPrice - advance,
         adminNotes,
+        adminMessage: adminMessage.trim(),
         status: 'awaiting_payment',
         reviewedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -301,7 +303,13 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                         <span className="text-sm font-black text-blue-900">₹{advance.toLocaleString()}</span>
                       </div>
 
-                      <textarea placeholder="Admin notes (internal)" value={adminNotes} onChange={e => setAdminNotes(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-medium text-xs outline-none resize-none" />
+                      <div>
+                        <label className="text-[10px] font-bold text-green-700 uppercase mb-1 block flex items-center gap-1"><Send className="w-3 h-3" /> Message to Customer</label>
+                        <textarea placeholder="e.g. We will connect with you shortly..." value={adminMessage} onChange={e => setAdminMessage(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-green-200 rounded-xl font-medium text-xs outline-none resize-none focus:border-green-500" />
+                        <p className="text-[9px] text-gray-400 font-bold mt-1">This message will be visible to the customer on their booking</p>
+                      </div>
+
+                      <textarea placeholder="Admin notes (internal — not visible to customer)" value={adminNotes} onChange={e => setAdminNotes(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-medium text-xs outline-none resize-none" />
 
                       <div className="flex gap-2">
                         <button onClick={handleApprove} disabled={saving} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50">
@@ -312,6 +320,18 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* WhatsApp Contact Button — available for all active bookings */}
+              {!isTerminal && (
+                <a
+                  href={`https://wa.me/${booking.userPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi ${booking.userName}, regarding your Kari King ${booking.type} booking #${booking.id.slice(-6)}:\n\nQuoted Price: ₹${(booking.quotedPrice || quotedPrice).toLocaleString()}\nAdvance (50%): ₹${(booking.advanceAmount || advance).toLocaleString()}\n\n${adminMessage || 'We will connect with you shortly to discuss the details.'}\n\nPay advance via UPI to confirm your order. Thank you!`)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] shadow-md shadow-green-500/20"
+                >
+                  <MessageSquare className="w-4 h-4" /> Send WhatsApp Message
+                </a>
               )}
 
               {/* Verify payment action */}

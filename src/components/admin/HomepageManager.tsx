@@ -160,7 +160,7 @@ export default function HomepageManager() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-black text-gray-900">Homepage CMS</h2>
           <p className="text-sm text-gray-400 mt-0.5">Control banners, offers & hero content shown on the homepage</p>
@@ -168,7 +168,7 @@ export default function HomepageManager() {
         {!showForm && (
           <button
             onClick={() => { setForm({ ...EMPTY_FORM, order: items.length }); setShowForm(true); }}
-            className="flex items-center gap-2 bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-600/20 transition-colors"
+            className="flex shrink-0 items-center gap-2 bg-red-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-600/20 transition-colors"
           >
             <Plus className="w-4 h-4" /> Add Content
           </button>
@@ -462,8 +462,9 @@ export default function HomepageManager() {
         </div>
       ) : (
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-          <table className="w-full text-left">
-            <thead>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left min-w-[800px]">
+              <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Content</th>
                 <th className="p-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Type</th>
@@ -544,7 +545,8 @@ export default function HomepageManager() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       )}
     </div>

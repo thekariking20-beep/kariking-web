@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, limit } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
@@ -8,7 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Package, Clock, CheckCircle2, Truck, XCircle,
   ChevronDown, ChevronUp, MapPin, Phone, ShoppingBag,
-  Navigation, Box, Zap, FileDown
+  Navigation, Box, Zap, FileDown, ArrowLeft
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { downloadInvoice } from '../lib/invoiceGenerator';
@@ -116,6 +117,7 @@ function LiveTimeline({ order }: { order: Order }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function Orders() {
   const { user, isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [orders, setOrders]           = useState<Order[]>([]);
   const [loading, setLoading]         = useState(true);
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
@@ -193,13 +195,21 @@ export default function Orders() {
     <div className="max-w-4xl mx-auto space-y-8">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-black text-gray-900">
-            {isAdmin ? 'Manage Orders' : 'Your Orders'}
-          </h1>
-          {!isAdmin && (
-            <p className="text-sm text-gray-400 mt-1">Track your orders in real-time</p>
-          )}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5 text-gray-700" />
+          </button>
+          <div>
+            <h1 className="text-3xl font-black text-gray-900">
+              {isAdmin ? 'Manage Orders' : 'Your Orders'}
+            </h1>
+            {!isAdmin && (
+              <p className="text-sm text-gray-400 mt-1">Track your orders in real-time</p>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />

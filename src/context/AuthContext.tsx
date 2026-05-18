@@ -181,42 +181,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await setDoc(doc(db, 'users', fUser.uid), newUser);
           
           // Handle referral rewards
-           if (referredBy) {
+          if (referredBy) {
             try {
-            // Guard: check if a referral already exists for this user (prevent duplicate on re-login)
-            const existingRefQuery = query(collection(db, 'referrals'), where('referredUserId', '==', fUser.uid), limit(1));
-            const existingRefSnap = await getDocs(existingRefQuery);
-            if (existingRefSnap.empty) {
-              const referrersQuery = query(collection(db, 'users'), where('referralCode', '==', referredBy));
-              const referrerSnap = await getDocs(referrersQuery);
-              if (!referrerSnap.empty) {
-                const referrerDoc = referrerSnap.docs[0];
-                
-                const isSelfReferral = referrerDoc.id === fUser.uid || 
-                  referrerDoc.data().phone === phoneNumber;
-                
-                if (!isSelfReferral) {
-                  await updateDoc(doc(db, 'users', referrerDoc.id), {
-                    lockedCoins: increment(5)
-                  });
+              // Guard: check if a referral already exists for this user (prevent duplicate on re-login)
+              const existingRefQuery = query(collection(db, 'referrals'), where('referredUserId', '==', fUser.uid), limit(1));
+              const existingRefSnap = await getDocs(existingRefQuery);
+              if (existingRefSnap.empty) {
+                const referrersQuery = query(collection(db, 'users'), where('referralCode', '==', referredBy));
+                const referrerSnap = await getDocs(referrersQuery);
+                if (!referrerSnap.empty) {
+                  const referrerDoc = referrerSnap.docs[0];
+                  
+                  const isSelfReferral = referrerDoc.id === fUser.uid || 
+                    referrerDoc.data().phone === phoneNumber;
+                  
+                  if (!isSelfReferral) {
+                    // Lock 5 coins on referrer + track referral count
+                    await updateDoc(doc(db, 'users', referrerDoc.id), {
+                      lockedCoins: increment(5),
+                      referralCount: increment(1),
+                    });
 
-                  await addDoc(collection(db, 'referrals'), {
-                    referrerId: referrerDoc.id,
-                    referrerPhone: referrerDoc.data().phone || '',
-                    referredUserId: fUser.uid,
-                    referredUserPhone: phoneNumber || '',
-                    status: 'pending',
-                    reward: 5,
-                    rewardGiven: false,
-                    createdAt: new Date().toISOString()
-                  });
+                    // Create referral record (pending until first order delivered)
+                    await addDoc(collection(db, 'referrals'), {
+                      referrerId: referrerDoc.id,
+                      referrerPhone: referrerDoc.data().phone || '',
+                      referredUserId: fUser.uid,
+                      referredUserPhone: phoneNumber || '',
+                      status: 'pending',
+                      reward: 5,
+                      rewardGiven: false,
+                      createdAt: new Date().toISOString()
+                    });
+
+                    console.log(`🎁 Referral created: referrer=${referrerDoc.id}, referred=${fUser.uid}, code=${referredBy}`);
+                  } else {
+                    console.warn('🚫 Self-referral blocked:', referredBy);
+                  }
+                } else {
+                  console.warn('🚫 Invalid referral code (no matching user):', referredBy);
                 }
+              } else {
+                console.log('ℹ️ Referral already exists for user:', fUser.uid);
               }
-            }
+              // Only clear pendingReferralCode AFTER successful processing
+              localStorage.removeItem('pendingReferralCode');
             } catch (refErr) {
-              console.error('Referral processing failed (non-blocking):', refErr);
+              console.error('❌ Referral processing failed — code preserved for retry:', refErr);
+              // Do NOT remove pendingReferralCode — preserve for next login attempt
             }
-            localStorage.removeItem('pendingReferralCode');
           }
           
           setUser(newUser);

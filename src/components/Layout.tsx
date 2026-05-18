@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, LogOut, Package, LayoutDashboard, Gift } from 'lucide-react';
+import { ShoppingCart, LogOut, Package, LayoutDashboard, Gift, User } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { cn } from '../lib/utils';
@@ -93,9 +93,14 @@ export default function Layout() {
             )}
 
             {user ? (
-              <button onClick={logout} className="text-gray-500 hover:text-red-600 transition-colors">
-                <LogOut className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-6">
+                <Link to="/profile" className="text-gray-500 hover:text-red-600 transition-colors">
+                  <User className="w-5 h-5" />
+                </Link>
+                <button onClick={logout} className="text-gray-500 hover:text-red-600 transition-colors">
+                  <LogOut className="w-5 h-5" />
+                </button>
+              </div>
             ) : (
               <Link to="/login" className="bg-red-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-red-700 transition-colors shadow-sm shadow-red-600/20">
                 Login

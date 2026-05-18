@@ -92,7 +92,14 @@ export default function Login() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ref = params.get('ref');
-    if (ref) setReferralCode(ref.toUpperCase());
+    if (ref) {
+      const code = ref.toUpperCase();
+      setReferralCode(code);
+      // Save to localStorage IMMEDIATELY so AuthContext can pick it up
+      // even if the user leaves and comes back, or the page reloads during OTP
+      localStorage.setItem('pendingReferralCode', code);
+      console.log('🔗 Referral code captured from URL:', code);
+    }
   }, []);
 
   // Helper: always create a fresh reCAPTCHA verifier before each OTP send
@@ -759,7 +766,7 @@ export default function Login() {
 
                 {/* Referral Code */}
                 <div className="mb-5">
-                  <details className="group">
+                  <details className="group" open={!!referralCode}>
                     <summary className="text-[12px] font-bold text-red-400/70 cursor-pointer select-none hover:text-red-400 transition-colors duration-300 list-none flex items-center gap-2 ml-1">
                       <svg className="w-3.5 h-3.5 transition-transform duration-300 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
                       Have a referral code?

@@ -187,6 +187,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await setDoc(doc(db, 'users', fUser.uid), newUser);
           
           // ─── Handle referral rewards — NEW USERS ONLY ─────────────
+          console.log('🆕 New user created. referredBy from localStorage:', referredBy);
           if (referredBy) {
             try {
               // Guard: check if a referral already exists for this user (prevent duplicate on re-login)

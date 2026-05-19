@@ -8,6 +8,10 @@ import { db } from '../firebase';
 import type { CoinTransaction, Referral } from '../types';
 import { COIN_VALUE } from '../config/coins';
 import { Link } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
+
+// Always use production URL for referral links (APK returns capacitor://localhost)
+const REFERRAL_BASE_URL = 'https://app.kariking.in';
 
 export default function Referral() {
   const { user } = useAuth();
@@ -17,7 +21,7 @@ export default function Referral() {
   const [loading, setLoading] = useState(true);
 
   const referralCode = user?.referralCode || 'NOTSET';
-  const referralLink = `${window.location.origin}/login?ref=${referralCode}`;
+  const referralLink = `${REFERRAL_BASE_URL}/login?ref=${referralCode}`;
   const coins = user?.coins || 0;
 
   useEffect(() => {
@@ -88,13 +92,39 @@ export default function Referral() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
+    const shareText = `🍗 Use my referral code ${referralCode} to sign up on Kari King and get fresh meat delivered! We both earn ₹100 in coins!\n\n${referralLink}`;
+
+    // Use native Capacitor Share on Android/iOS
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { Share } = await import('@capacitor/share');
+        await Share.share({
+          title: 'Join Kari King — Fresh Meat Delivered',
+          text: shareText,
+          url: referralLink,
+          dialogTitle: 'Share your referral code',
+        });
+        return;
+      } catch (e) {
+        console.warn('Native share failed, trying web fallback:', e);
+      }
+    }
+
+    // Web fallback
     if (navigator.share) {
-      navigator.share({
-        title: 'Join Kari King',
-        text: `Use my referral code ${referralCode} to get fresh meat delivered and earn rewards!`,
-        url: referralLink,
-      });
+      try {
+        await navigator.share({
+          title: 'Join Kari King',
+          text: shareText,
+          url: referralLink,
+        });
+      } catch (e) {
+        // User cancelled share — not an error
+        if ((e as any)?.name !== 'AbortError') {
+          handleCopyLink();
+        }
+      }
     } else {
       handleCopyLink();
     }

@@ -194,6 +194,7 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   const paymentLabels: Record<string, string> = {
     qr: 'UPI QR Payment',
     coins: 'Kari Coins',
+    cod: 'Cash on Delivery',
   };
   doc.text(paymentLabels[order.paymentMethod] || order.paymentMethod, col1 + 110, metaVY);
 
@@ -228,6 +229,29 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
     }
 
     y += (isPaid && order.utrNumber ? 20 : 14);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // COD PAYMENT STATUS BANNER (if applicable)
+  // ═══════════════════════════════════════════════════════════════════════
+  if (order.paymentMethod === 'cod') {
+    const isCollected = (order as any).codCollectedAt || order.paymentStatus === 'collected';
+
+    doc.setFillColor(isCollected ? 240 : 255, isCollected ? 253 : 251, isCollected ? 244 : 235);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, 10, 2, 2, 'F');
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+
+    if (isCollected) {
+      doc.setTextColor(22, 163, 74);
+      doc.text('CASH COLLECTED', col1 + 3, y + 5);
+    } else {
+      doc.setTextColor(180, 120, 0);
+      doc.text('COD — PAYMENT PENDING', col1 + 3, y + 5);
+    }
+
+    y += 14;
   }
 
   // ═══════════════════════════════════════════════════════════════════════

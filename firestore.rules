@@ -76,13 +76,14 @@ service cloud.firestore {
       // SECURITY: Order creation must happen via Cloud Function 'createOrder' ONLY
       allow create: if false; 
       allow update: if isDashboardUser();
-      // PATCH 2: Delivery partner can ONLY update status-tracking fields
-      // Prevents modification of financial fields (paymentStatus, totalAmount, finalAmount, etc.)
+      // PATCH 2: Delivery partner can ONLY update status-tracking + COD collection fields
+      // Prevents modification of financial fields (totalAmount, finalAmount, coinsUsed, etc.)
       allow update: if isAuthenticated() 
         && resource.data.deliveryPartnerId == request.auth.uid
         && request.resource.data.deliveryPartnerId == request.auth.uid // Prevent re-assigning
         && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'statusHistory', 'updatedAt', 'acceptedAt', 'pickedAt', 'deliveredAt']);
+            .hasOnly(['status', 'statusHistory', 'updatedAt', 'acceptedAt', 'pickedAt', 'deliveredAt',
+                       'paymentStatus', 'codCollectedAt', 'codCollectedBy', 'codCollectedAmount']);
       allow delete: if isAdmin();
     }
 

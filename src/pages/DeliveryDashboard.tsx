@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { Order } from '../types';
 import {
   Package, MapPin, Phone, Truck, CheckCircle2, Navigation,
-  User, Zap, LogOut, ShoppingBag, Box, WifiOff, Wifi, PhoneCall, PartyPopper
+  User, Zap, LogOut, ShoppingBag, Box, WifiOff, Wifi, PhoneCall, PartyPopper, Banknote
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -136,6 +136,28 @@ export default function DeliveryDashboard() {
     } catch (e) {
       console.error(e);
       setErrorToast("Failed to update order. Check internet.");
+      setTimeout(() => setErrorToast(null), 3000);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  // ─── Mark COD Cash Collected ────────────────────────────────────────────
+  const markCodCollected = async (order: Order) => {
+    if (updatingOrderId === order.id) return;
+    setUpdatingOrderId(order.id);
+    try {
+      const now = new Date().toISOString();
+      await updateDoc(doc(db, 'orders', order.id), {
+        paymentStatus: 'collected',
+        codCollectedAt: now,
+        codCollectedBy: user?.uid || '',
+        codCollectedAmount: order.finalAmount || order.totalAmount,
+        updatedAt: now,
+      });
+    } catch (e) {
+      console.error(e);
+      setErrorToast("Failed to mark cash collected. Try again.");
       setTimeout(() => setErrorToast(null), 3000);
     } finally {
       setUpdatingOrderId(null);
@@ -391,6 +413,35 @@ export default function DeliveryDashboard() {
                     </div>
                   )}
 
+                  {/* 💵 COD Cash Collection Banner */}
+                  {order.paymentMethod === 'cod' && (
+                    <div className={cn(
+                      "mb-4 rounded-xl p-3 border",
+                      (order as any).codCollectedAt || order.paymentStatus === 'collected'
+                        ? "bg-green-50 border-green-200"
+                        : "bg-amber-50 border-amber-200"
+                    )}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Banknote className={cn(
+                          "w-4 h-4",
+                          (order as any).codCollectedAt ? "text-green-600" : "text-amber-600"
+                        )} />
+                        <span className={cn(
+                          "text-[9px] font-black uppercase tracking-widest",
+                          (order as any).codCollectedAt ? "text-green-700" : "text-amber-700"
+                        )}>
+                          {(order as any).codCollectedAt ? 'Cash Collected ✓' : 'Collect Cash'}
+                        </span>
+                      </div>
+                      <p className={cn(
+                        "text-2xl font-black",
+                        (order as any).codCollectedAt ? "text-green-700" : "text-amber-800"
+                      )}>
+                        ₹{order.finalAmount || order.totalAmount}
+                      </p>
+                    </div>
+                  )}
+
                   {/* 📍 Customer Info (Address + Phone) */}
                   <div className="space-y-3">
                     <div className="flex items-start gap-3">
@@ -459,11 +510,28 @@ export default function DeliveryDashboard() {
 
                       {/* 🔵 Dispatched → Delivered */}
                       {order.status === 'Dispatched' && (
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => updateStatus(order, 'Delivered')}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-blue-600/20"
+                          >
+                            <CheckCircle2 className="w-6 h-6" /> COMPLETE DELIVERY
+                          </button>
+                        </div>
+                      )}
+
+                      {/* 💵 COD: Mark Cash Collected (after delivery) */}
+                      {order.paymentMethod === 'cod' 
+                        && order.status === 'Delivered' 
+                        && !(order as any).codCollectedAt 
+                        && order.paymentStatus !== 'collected' && (
                         <button
-                          onClick={() => updateStatus(order, 'Delivered')}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-blue-600/20"
+                          onClick={() => markCodCollected(order)}
+                          disabled={updatingOrderId === order.id}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-green-600/20 disabled:opacity-50 mt-2"
                         >
-                          <CheckCircle2 className="w-6 h-6" /> COMPLETE DELIVERY
+                          <Banknote className="w-5 h-5" />
+                          {updatingOrderId === order.id ? 'Updating...' : `CASH COLLECTED — ₹${order.finalAmount || order.totalAmount}`}
                         </button>
                       )}
                     </div>

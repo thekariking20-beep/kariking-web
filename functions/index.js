@@ -120,8 +120,10 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
           await getMessaging().send({
             token: partnerToken,
             notification: {
-              title: "📦 New Delivery Assigned",
-              body: `Order${orderId ? ` #${orderId.slice(-6).toUpperCase()}` : ""} is ready for pickup`,
+              title: after.paymentMethod === 'cod' ? "💵 COD Delivery Assigned" : "📦 New Delivery Assigned",
+              body: after.paymentMethod === 'cod'
+                ? `Order #${orderId ? orderId.slice(-6).toUpperCase() : ''} — Collect ₹${after.finalAmount || after.totalAmount} cash`
+                : `Order${orderId ? ` #${orderId.slice(-6).toUpperCase()}` : ""} is ready for pickup`,
             },
             data: {
               orderId: orderId,
@@ -632,6 +634,7 @@ exports.createOrder = onCall(async (request) => {
     totalSavings: discountAmount + ((deliveryFee || 0) === 0 && totalPrice >= 500 ? 40 : 0),
     deliveryCharge: deliveryFee || 0,
     utrNumber: null,
+    isCOD: paymentMethod === 'cod',
     idempotencyKey: idempotencyKey || null,
     createdAt: now,
     updatedAt: now,

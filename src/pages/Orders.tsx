@@ -301,11 +301,23 @@ export default function Orders() {
                           <LiveTimeline order={order} />
 
                           {/* ─── COD Payment Info Banner ──────────────── */}
-                          {order.paymentMethod === 'cod' && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
-                            <div className="bg-green-50 border border-green-100 rounded-xl p-4">
-                              <p className="text-sm font-bold text-green-800">💵 Cash on Delivery</p>
-                              <p className="text-xs text-green-600 mt-0.5">Please keep ₹{order.finalAmount || order.totalAmount} ready. Pay in cash when your order arrives.</p>
-                            </div>
+                          {order.paymentMethod === 'cod' && order.status !== 'Cancelled' && (
+                            order.paymentStatus === 'collected' || order.codCollectedAt ? (
+                              <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                                <p className="text-sm font-bold text-green-800">✅ Cash Collected</p>
+                                <p className="text-xs text-green-600 mt-0.5">Payment of ₹{order.finalAmount || order.totalAmount} received successfully.</p>
+                              </div>
+                            ) : order.status !== 'Delivered' ? (
+                              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                                <p className="text-sm font-bold text-amber-800">💵 Cash on Delivery</p>
+                                <p className="text-xs text-amber-600 mt-0.5">Please keep ₹{order.finalAmount || order.totalAmount} ready. Pay in cash when your order arrives.</p>
+                              </div>
+                            ) : (
+                              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                                <p className="text-sm font-bold text-amber-800">💵 Cash on Delivery — Pending Collection</p>
+                                <p className="text-xs text-amber-600 mt-0.5">Awaiting cash collection confirmation from delivery partner.</p>
+                              </div>
+                            )
                           )}
 
                           {/* ─── UPI Payment Status Banners ──────────────── */}

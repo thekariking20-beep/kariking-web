@@ -30,6 +30,7 @@ function PaymentBadge({ method, status }: { method: string; status: string }) {
     awaiting_payment: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Awaiting', pulse: true },
     under_review: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Under Review', pulse: true },
     confirmed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Confirmed' },
+    collected: { bg: 'bg-green-100', text: 'text-green-700', label: 'Collected' },
     paid: { bg: 'bg-green-100', text: 'text-green-700', label: 'Paid' },
     rejected: { bg: 'bg-red-100', text: 'text-red-700', label: 'Rejected' },
     failed: { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed' },

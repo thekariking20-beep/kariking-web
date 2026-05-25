@@ -225,12 +225,17 @@ export interface Order {
   finalAmount: number;        // Final amount after coins + delivery
   // ─── Payment Architecture ──────────────────────────────────────
   paymentMethod: 'qr' | 'coins' | 'cod';
-  paymentStatus: 'pending' | 'awaiting_payment' | 'under_review' | 'confirmed' | 'rejected' | 'paid' | 'failed';
+  paymentStatus: 'pending' | 'awaiting_payment' | 'under_review' | 'confirmed' | 'rejected' | 'paid' | 'failed' | 'collected';
   utrNumber?: string;
   idempotencyKey?: string;
   rejectReason?: string;
   paymentSubmittedAt?: string;
   verifiedAt?: string;
+  // ─── COD Fields (backward compatible) ──────────────────────────
+  isCOD?: boolean;
+  codCollectedAt?: string;
+  codCollectedBy?: string;
+  codCollectedAmount?: number;
   // ─── Order Details ────────────────────────────────────────────────
   status: 'Order Placed' | 'Order Received' | 'Packed' | 'Dispatched' | 'Delivered' | 'Cancelled';
   statusHistory: StatusUpdate[];

@@ -61,6 +61,27 @@ function getNotification(status, orderId) {
   return templates[status] || { title: "📋 Order Update", body: `Status: ${status}` };
 }
 
+// ─── Notification Helper with Token Cleanup ─────────────────────────────────────
+async function sendPushNotification(message, uid) {
+  try {
+    await getMessaging().send(message);
+    return true;
+  } catch (err) {
+    if (err.code === 'messaging/invalid-registration-token' || err.code === 'messaging/registration-token-not-registered') {
+      console.warn(`[FCM] Removing invalid token for user ${uid}`);
+      try {
+        await db.collection('users').doc(uid).update({ fcmToken: FieldValue.delete() });
+      } catch (e) {
+        console.error(`[FCM] Failed to delete token for ${uid}:`, e);
+      }
+    } else {
+      console.error(`[FCM] Error sending notification to ${uid}:`, err);
+    }
+    return false;
+  }
+}
+
+
 // ─── Cloud Function: Trigger on Order Status Change ───────────────────────────
 exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event) => {
   const before = event.data.before.data();
@@ -138,38 +159,6 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
     }
   }
 
-  // 3. Notify admin on new orders
-  if (after.status === "Order Placed") {
-    try {
-      const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
-      const tokens = [];
-      adminsSnap.forEach((doc) => {
-        const token = doc.data().fcmToken;
-        if (token) tokens.push(token);
-      });
-
-      if (tokens.length > 0) {
-        const payLabels = { qr: "UPI QR", coins: "Coins", cod: "Cash on Delivery" };
-        const payLabel = payLabels[after.paymentMethod] || after.paymentMethod;
-        const messages = tokens.map((token) => ({
-          token,
-          notification: {
-            title: "🔔 New Order!",
-            body: `₹${after.finalAmount || after.totalAmount} via ${payLabel}`,
-          },
-          data: {
-            orderId: orderId,
-            type: "new_order",
-          },
-        }));
-
-        await Promise.all(messages.map((msg) => getMessaging().send(msg)));
-        console.log(`✅ Admin notifications sent (${tokens.length} admins)`);
-      }
-    } catch (err) {
-      console.error("Error sending admin notification:", err);
-    }
-  }
 
   // 4. Handle delivery completion
   if (after.status === "Delivered") {
@@ -658,11 +647,50 @@ exports.createOrder = onCall(async (request) => {
     console.log(`[EVENT: paymentStarted] Payment flow initiated for order ${docRef.id} via UPI QR.`);
   }
 
+  // ─── Notify Admins ──────────────────────────────────────────────────────
+  try {
+    const adminsSnap = await db.collection("users").where("role", "in", ["admin", "manager", "superAdmin"]).get();
+    const payLabels = { qr: "UPI QR", coins: "Coins", cod: "Cash on Delivery" };
+    const payLabel = payLabels[paymentMethod] || paymentMethod;
+    
+    const messages = [];
+    adminsSnap.forEach((doc) => {
+      const token = doc.data().fcmToken;
+      if (token) {
+        messages.push({
+          token,
+          notification: {
+            title: "🛒 New Order Received!",
+            body: `Order #${docRef.id.slice(-6).toUpperCase()} • ₹${finalAmount} via ${payLabel}`,
+          },
+          data: {
+            orderId: docRef.id,
+            customerName: userName,
+            amount: String(finalAmount),
+            paymentMethod,
+            type: "new_order",
+          },
+        });
+      }
+    });
+
+    if (messages.length > 0) {
+      await Promise.all(messages.map((msg) => sendPushNotification(msg, msg.token)));
+      console.log(`[FCM] New order notification sent to ${messages.length} admins/managers`);
+    }
+    
+    // Mark order as admin notified to prevent duplicate sends later
+    await docRef.update({ adminNotificationSent: true });
+  } catch (err) {
+    console.error("[FCM] Error sending new order notifications:", err);
+  }
+
   return { 
     success: true, 
     orderId: docRef.id,
     finalAmount 
   };
+
 
   } catch (err) {
     // Re-throw HttpsErrors as-is, wrap everything else

@@ -61,8 +61,15 @@ export default function NotificationToast() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-            className="pointer-events-auto bg-white rounded-2xl shadow-2xl shadow-black/10 border border-gray-100 p-4 flex items-start gap-3 cursor-pointer"
-            onClick={() => dismiss(toast.id)}
+            className="pointer-events-auto bg-white rounded-2xl shadow-2xl shadow-black/10 border border-gray-100 p-4 flex items-start gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
+            onClick={() => {
+              dismiss(toast.id);
+              if (payload.data?.type === 'new_order' || payload.data?.type === 'delivery_assignment') {
+                if (window.location.pathname !== '/admin') window.location.href = '/admin';
+              } else {
+                if (window.location.pathname !== '/orders') window.location.href = '/orders';
+              }
+            }}
           >
             {/* Icon */}
             <div className="w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center shrink-0">

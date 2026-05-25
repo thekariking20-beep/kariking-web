@@ -300,6 +300,14 @@ export default function Orders() {
                           {/* Live Timeline */}
                           <LiveTimeline order={order} />
 
+                          {/* ─── COD Payment Info Banner ──────────────── */}
+                          {order.paymentMethod === 'cod' && order.status !== 'Delivered' && order.status !== 'Cancelled' && (
+                            <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                              <p className="text-sm font-bold text-green-800">💵 Cash on Delivery</p>
+                              <p className="text-xs text-green-600 mt-0.5">Please keep ₹{order.finalAmount || order.totalAmount} ready. Pay in cash when your order arrives.</p>
+                            </div>
+                          )}
+
                           {/* ─── UPI Payment Status Banners ──────────────── */}
                           {order.paymentMethod === 'qr' && order.paymentStatus === 'awaiting_payment' && order.status !== 'Cancelled' && (
                             <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">

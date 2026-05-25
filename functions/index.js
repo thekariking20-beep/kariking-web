@@ -147,7 +147,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       });
 
       if (tokens.length > 0) {
-        const payLabels = { qr: "UPI QR", coins: "Coins" };
+        const payLabels = { qr: "UPI QR", coins: "Coins", cod: "Cash on Delivery" };
         const payLabel = payLabels[after.paymentMethod] || after.paymentMethod;
         const messages = tokens.map((token) => ({
           token,
@@ -604,6 +604,8 @@ exports.createOrder = onCall(async (request) => {
     paymentStatus = 'paid';
   } else if (paymentMethod === 'qr') {
     paymentStatus = 'awaiting_payment';
+  } else if (paymentMethod === 'cod') {
+    paymentStatus = 'pending';
   }
 
   const orderData = {

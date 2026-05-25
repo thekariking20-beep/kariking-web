@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { COIN_VALUE, COIN_EARN_THRESHOLD, formatCoinUsage } from '../config/coins';
 import { useNavigate, Link } from 'react-router-dom';
-import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone, Tag } from 'lucide-react';
+import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard, Wallet, QrCode as QrCodeIcon, Zap, Coins, X, CheckCircle2, AlertCircle, Sparkles, WifiOff, Loader2, Smartphone, Tag, Banknote } from 'lucide-react';
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
@@ -199,6 +199,42 @@ export default function Cart() {
     if (canPayFullyWithCoins && useCoins) effectiveMethod = 'coins';
 
     setError('');
+
+    // ─── COD Flow: Create order directly, no payment modal needed ────
+    if (effectiveMethod === 'cod') {
+      setLoading(true);
+      let iKey = idempotencyKey;
+      if (!iKey) { iKey = crypto.randomUUID(); setIdempotencyKey(iKey); }
+
+      try {
+        const createOrderFn = httpsCallable(functions, 'createOrder');
+        const response = await createOrderFn({
+          items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
+          address, phone, useCoins, coinsToUse: coinsBeingUsed,
+          paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
+          couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
+        });
+        const data = response.data as { success: boolean; orderId: string; finalAmount: number };
+        if (data?.success) {
+          pendingCheckoutRef.current = null;
+          refreshUser().catch(() => {});
+          clearCart();
+          setIdempotencyKey('');
+          setAppliedCoupon(null);
+          setOrderPlaced(true);
+          setTimeout(() => navigate('/orders'), 3000);
+        }
+      } catch (err: any) {
+        const code = err?.code || '';
+        if (code === 'unauthenticated') navigate('/login');
+        else if (!navigator.onLine) { setIsOffline(true); pendingCheckoutRef.current = true; }
+        else setError(err?.message || 'Order failed. Please try again.');
+      } finally {
+        setLoading(false);
+        checkoutInProgressRef.current = false;
+      }
+      return;
+    }
 
     // ─── QR Flow: Create order FIRST, THEN show modal ───────────────────
     if (effectiveMethod === 'qr' && finalTotal > 0) {
@@ -414,6 +450,8 @@ export default function Cart() {
         <p className="text-gray-500 max-w-sm mb-8 font-medium">
           {paymentMethod === 'qr' 
             ? 'Your payment is being verified. We\'ll notify you once confirmed!'
+            : paymentMethod === 'cod'
+            ? 'Pay in cash when your order arrives. Redirecting to your orders...'
             : 'Thank you for choosing Kari King. Redirecting to your orders...'}
         </p>
       </div>
@@ -781,7 +819,35 @@ export default function Cart() {
                     "w-5 h-5 rounded-full border-2 flex items-center justify-center",
                     paymentMethod === 'qr' ? "border-blue-500 bg-blue-500" : "border-gray-300"
                   )}>
-                    {paymentMethod === 'qr' && <div className="w-2 h-2 rounded-full bg-white" />}
+                  {paymentMethod === 'qr' && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                </button>
+
+                {/* Cash on Delivery */}
+                <button
+                  onClick={() => setPaymentMethod('cod')}
+                  className={cn(
+                    "w-full p-4 rounded-xl border-2 flex items-center gap-3 transition-all text-left",
+                    paymentMethod === 'cod'
+                      ? "border-green-500 bg-green-50/50 shadow-sm"
+                      : "border-gray-100 bg-white hover:border-gray-200"
+                  )}
+                >
+                  <div className={cn(
+                    "w-10 h-10 rounded-xl flex items-center justify-center",
+                    paymentMethod === 'cod' ? "bg-green-600 text-white" : "bg-gray-100 text-gray-400"
+                  )}>
+                    <Banknote className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-bold text-gray-900 text-sm">Cash on Delivery</p>
+                    <p className="text-[10px] text-gray-400">Pay when your order arrives</p>
+                  </div>
+                  <div className={cn(
+                    "w-5 h-5 rounded-full border-2 flex items-center justify-center",
+                    paymentMethod === 'cod' ? "border-green-500 bg-green-500" : "border-gray-300"
+                  )}>
+                    {paymentMethod === 'cod' && <div className="w-2 h-2 rounded-full bg-white" />}
                   </div>
                 </button>
               </div>

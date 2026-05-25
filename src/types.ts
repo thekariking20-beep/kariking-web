@@ -189,7 +189,7 @@ export interface BulkBooking {
   // Status
   status: BulkBookingStatus;
   paymentStatus: BulkPaymentStatus;
-  paymentMethod?: 'qr';
+  paymentMethod?: 'qr' | 'cod';
 
   // Timestamps
   createdAt: string;
@@ -224,7 +224,7 @@ export interface Order {
   totalAmount: number;        // Subtotal before discounts
   finalAmount: number;        // Final amount after coins + delivery
   // ─── Payment Architecture ──────────────────────────────────────
-  paymentMethod: 'qr' | 'coins';
+  paymentMethod: 'qr' | 'coins' | 'cod';
   paymentStatus: 'pending' | 'awaiting_payment' | 'under_review' | 'confirmed' | 'rejected' | 'paid' | 'failed';
   utrNumber?: string;
   idempotencyKey?: string;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown } from 'lucide-react';
+import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown, Banknote } from 'lucide-react';
 import { Order, User, BulkBooking } from '../../types';
 import { db } from '../../firebase';
 import { downloadInvoice, resolveCustomerName } from '../../lib/invoiceGenerator';
@@ -20,11 +20,13 @@ function PaymentBadge({ method, status }: { method: string; status: string }) {
   const configs: Record<string, { icon: React.ElementType; bg: string; text: string; label: string }> = {
     qr: { icon: QrCode, bg: 'bg-blue-100', text: 'text-blue-700', label: 'UPI QR' },
     coins: { icon: Coins, bg: 'bg-amber-100', text: 'text-amber-700', label: 'Coins' },
+    cod: { icon: Banknote, bg: 'bg-green-100', text: 'text-green-700', label: 'COD' },
   };
   const config = configs[method] || { icon: CreditCard, bg: 'bg-gray-100', text: 'text-gray-600', label: method };
   const Icon = config.icon;
 
   const statusMap: Record<string, { bg: string; text: string; label: string; pulse?: boolean }> = {
+    pending: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'Pending' },
     awaiting_payment: { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Awaiting', pulse: true },
     under_review: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Under Review', pulse: true },
     confirmed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Confirmed' },

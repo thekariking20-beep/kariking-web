@@ -21,33 +21,37 @@ messaging.onBackgroundMessage((payload) => {
   console.log('[SW] Background message received:', payload);
 
   const title = payload.notification?.title || 'Kari King';
+  const type = payload.data?.type || '';
+  const isAdminNotif = ['new_order', 'utr_submitted', 'kyc_request', 'bulk_booking_new', 'bulk_booking_paid', 'withdrawal_request'].includes(type);
+
   const options = {
     body: payload.notification?.body || 'You have a new update',
-    icon: '/kariking-logo.jpg',
-    badge: '/kariking-logo.jpg',
-    vibrate: [200, 100, 200],
-    tag: payload.data?.orderId || 'kari-king-notification', // Prevent duplicate notifications
+    icon: '/logo.png',
+    badge: '/logo.png',
+    vibrate: [200, 100, 200, 100, 200],
+    tag: payload.data?.orderId || payload.data?.bookingId || `kk-${type}-${Date.now()}`,
     renotify: true,
+    requireInteraction: isAdminNotif,
     data: payload.data || {},
     actions: [
-      { action: 'open', title: 'View Order' },
+      { action: 'open', title: isAdminNotif ? 'View in Dashboard' : 'View Order' },
     ],
   };
 
   self.registration.showNotification(title, options);
 });
 
-// Handle notification click — open the correct order
+// Handle notification click — open the correct page
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const orderId = event.notification.data?.orderId;
-  const type = event.notification.data?.type;
-  
+  const data = event.notification.data || {};
+  const type = data.type || '';
+
   // Determine target URL based on notification type
   let targetUrl = '/orders';
-  if (type === 'new_order' || type === 'delivery_assignment') {
-    targetUrl = '/admin'; // Admin notifications go to admin page
+  if (['new_order', 'utr_submitted', 'kyc_request', 'bulk_booking_new', 'bulk_booking_paid', 'delivery_assignment', 'withdrawal_request'].includes(type)) {
+    targetUrl = '/admin';
   }
 
   event.waitUntil(
@@ -58,7 +62,7 @@ self.addEventListener('notificationclick', (event) => {
           client.focus();
           client.postMessage({
             type: 'NOTIFICATION_CLICK',
-            orderId: orderId,
+            orderId: data.orderId,
             notificationType: type,
           });
           return;

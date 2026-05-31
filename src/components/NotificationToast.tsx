@@ -9,6 +9,7 @@ interface ToastData {
   title: string;
   body: string;
   icon: React.ReactNode;
+  notificationType: string; // Store the notification type for click routing
 }
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
@@ -19,6 +20,8 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   'Delivered':      <CheckCircle2 className="w-5 h-5 text-green-600" />,
 };
 
+const ADMIN_NOTIFICATION_TYPES = ['new_order', 'delivery_assignment', 'utr_submitted', 'kyc_request', 'bulk_booking_new', 'bulk_booking_paid', 'withdrawal_request'];
+
 export default function NotificationToast() {
   const [toasts, setToasts] = useState<ToastData[]>([]);
 
@@ -26,12 +29,14 @@ export default function NotificationToast() {
     const title = payload.notification?.title || 'Kari King';
     const body = payload.notification?.body || '';
     const status = payload.data?.status || '';
+    const notificationType = payload.data?.type || '';
 
     const toast: ToastData = {
       id: Date.now().toString(),
       title,
       body,
       icon: STATUS_ICONS[status] || <Bell className="w-5 h-5 text-red-600" />,
+      notificationType,
     };
 
     setToasts(prev => [toast, ...prev].slice(0, 3)); // Max 3 toasts
@@ -64,7 +69,7 @@ export default function NotificationToast() {
             className="pointer-events-auto bg-white rounded-2xl shadow-2xl shadow-black/10 border border-gray-100 p-4 flex items-start gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
             onClick={() => {
               dismiss(toast.id);
-              if (payload.data?.type === 'new_order' || payload.data?.type === 'delivery_assignment') {
+              if (ADMIN_NOTIFICATION_TYPES.includes(toast.notificationType)) {
                 if (window.location.pathname !== '/admin') window.location.href = '/admin';
               } else {
                 if (window.location.pathname !== '/orders') window.location.href = '/orders';

@@ -1,6 +1,6 @@
 import { getToken, onMessage, type MessagePayload } from 'firebase/messaging';
 import { doc, updateDoc } from 'firebase/firestore';
-import { db, messaging } from '../firebase';
+import { db, getMessagingInstance, messaging } from '../firebase';
 
 // ─── VAPID Key (from Firebase Console → Cloud Messaging → Web Push certificates) ─
 // You can generate this in: Firebase Console → Project Settings → Cloud Messaging → Web configuration
@@ -31,10 +31,13 @@ export async function requestNotificationPermission(): Promise<boolean> {
 /**
  * Get FCM token for this device.
  * Returns the token string, or null if unavailable.
+ * Uses getMessagingInstance() to await async initialization (fixes race condition).
  */
 export async function getFCMToken(): Promise<string | null> {
   try {
-    if (!messaging) {
+    // Await the messaging instance (fixes race condition with isSupported)
+    const msg = await getMessagingInstance();
+    if (!msg) {
       console.warn('Firebase Messaging not supported in this browser.');
       return null;
     }
@@ -48,7 +51,7 @@ export async function getFCMToken(): Promise<string | null> {
       swRegistration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
     }
 
-    const token = await getToken(messaging, {
+    const token = await getToken(msg, {
       vapidKey: VAPID_KEY,
       serviceWorkerRegistration: swRegistration,
     });
@@ -74,16 +77,30 @@ export async function saveFCMToken(uid: string, token: string): Promise<void> {
 /**
  * Register FCM token on login.
  * Combines all steps: permission → get token → save to Firestore.
+ * Includes 1 retry on failure for resilience.
  */
 export async function registerPushNotifications(uid: string): Promise<void> {
-  try {
-    const token = await getFCMToken();
-    if (token) {
-      await saveFCMToken(uid, token);
-      console.log('✅ FCM token registered');
+  const attempt = async (): Promise<boolean> => {
+    try {
+      const token = await getFCMToken();
+      if (token) {
+        await saveFCMToken(uid, token);
+        console.log('✅ FCM token registered');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Failed to register push notifications:', err);
+      return false;
     }
-  } catch (err) {
-    console.error('Failed to register push notifications:', err);
+  };
+
+  // First attempt
+  const success = await attempt();
+  if (!success) {
+    // Retry once after 2 seconds
+    await new Promise(r => setTimeout(r, 2000));
+    await attempt();
   }
 }
 

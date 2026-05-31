@@ -37,13 +37,29 @@ enableIndexedDbPersistence(db).catch((err) => {
 // Firebase Cloud Messaging (FCM) — requires browser support
 import { getMessaging, isSupported } from 'firebase/messaging';
 
-let messaging: ReturnType<typeof getMessaging> | null = null;
+type MessagingInstance = ReturnType<typeof getMessaging>;
 
-isSupported().then(supported => {
+let _messaging: MessagingInstance | null = null;
+let _messagingReady: Promise<MessagingInstance | null> | null = null;
+
+// Initialize messaging and store the promise so consumers can await it
+_messagingReady = isSupported().then(supported => {
   if (supported) {
-    messaging = getMessaging(app);
+    _messaging = getMessaging(app);
+    return _messaging;
   }
-}).catch(() => {});
+  return null;
+}).catch(() => null);
 
-export { messaging };
+/**
+ * Get the Firebase Messaging instance, waiting for isSupported() to resolve.
+ * This eliminates the race condition where messaging is null when getFCMToken runs.
+ */
+export async function getMessagingInstance(): Promise<MessagingInstance | null> {
+  if (_messaging) return _messaging;
+  return _messagingReady;
+}
+
+// Keep the sync export for backward compat (onForegroundMessage uses it after init)
+export { _messaging as messaging };
 export { app as firebaseApp };

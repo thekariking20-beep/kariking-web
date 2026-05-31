@@ -107,7 +107,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       const fcmToken = userDoc.data().fcmToken;
       if (fcmToken) {
         const notification = getNotification(after.status, orderId);
-        await getMessaging().send({
+        await sendPushNotification({
           token: fcmToken,
           notification: {
             title: notification.title,
@@ -118,12 +118,21 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
             status: after.status,
             type: "order_update",
           },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "default",
+              priority: "max",
+              defaultSound: true,
+              defaultVibrateTimings: true,
+            },
+          },
           webpush: {
             fcmOptions: {
               link: "/orders",
             },
           },
-        });
+        }, after.userId);
         console.log(`✅ Notification sent to user ${after.userId}`);
       }
     }
@@ -138,7 +147,7 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
       if (partnerDoc.exists) {
         const partnerToken = partnerDoc.data().fcmToken;
         if (partnerToken) {
-          await getMessaging().send({
+          await sendPushNotification({
             token: partnerToken,
             notification: {
               title: after.paymentMethod === 'cod' ? "💵 COD Delivery Assigned" : "📦 New Delivery Assigned",
@@ -150,7 +159,16 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               orderId: orderId,
               type: "delivery_assignment",
             },
-          });
+            android: {
+              priority: "high",
+              notification: {
+                channelId: "default",
+                priority: "max",
+                defaultSound: true,
+                defaultVibrateTimings: true,
+              },
+            },
+          }, after.deliveryPartnerId);
           console.log(`✅ Notification sent to delivery partner ${after.deliveryPartnerId}`);
         }
       }
@@ -287,15 +305,19 @@ exports.onOrderStatusChange = onDocumentUpdated("orders/{orderId}", async (event
               // Notify Referrer
               const refToken = referrerData.fcmToken;
               if (refToken) {
-                await getMessaging().send({
+                await sendPushNotification({
                   token: refToken,
                   notification: {
                     title: multiplier > 1 ? `🎁 ${multiplier}x Referral Bonus Unlocked!` : "🎁 Referral Bonus Unlocked!",
                     body: multiplier > 1
                       ? `Your friend completed their first order! You earned ${REFERRER_REWARD} coins (${multiplier}x event active!)`
                       : `Your friend received their first order! You earned 5 coins.`,
-                  }
-                }).catch(() => {});
+                  },
+                  android: {
+                    priority: "high",
+                    notification: { channelId: "default", defaultSound: true },
+                  },
+                }, referrerDoc.id).catch(() => {});
               }
               console.log(`🎁 Referral bonus (${multiplier}x): referrer=${referrerDoc.id} (+${REFERRER_REWARD}), referred=${after.userId} (+${REFERRED_REWARD}), order=${orderId}`);
             } else {
@@ -654,8 +676,9 @@ exports.createOrder = onCall(async (request) => {
     const payLabel = payLabels[paymentMethod] || paymentMethod;
     
     const messages = [];
-    adminsSnap.forEach((doc) => {
-      const token = doc.data().fcmToken;
+    const adminUids = [];
+    adminsSnap.forEach((adminDoc) => {
+      const token = adminDoc.data().fcmToken;
       if (token) {
         messages.push({
           token,
@@ -665,17 +688,27 @@ exports.createOrder = onCall(async (request) => {
           },
           data: {
             orderId: docRef.id,
-            customerName: userName,
+            customerName: customerName,
             amount: String(finalAmount),
             paymentMethod,
             type: "new_order",
           },
+          android: {
+            priority: "high",
+            notification: {
+              channelId: "default",
+              priority: "max",
+              defaultSound: true,
+              defaultVibrateTimings: true,
+            },
+          },
         });
+        adminUids.push(adminDoc.id);
       }
     });
 
     if (messages.length > 0) {
-      await Promise.all(messages.map((msg) => sendPushNotification(msg, msg.token)));
+      await Promise.all(messages.map((msg, i) => sendPushNotification(msg, adminUids[i])));
       console.log(`[FCM] New order notification sent to ${messages.length} admins/managers`);
     }
     
@@ -768,23 +801,30 @@ exports.submitUtr = onCall(async (request) => {
 
   // Notify admins
   try {
-    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
-    const tokens = [];
-    adminsSnap.forEach((doc) => {
-      const token = doc.data().fcmToken;
-      if (token) tokens.push(token);
+    const adminsSnap = await db.collection("users").where("role", "in", ["admin", "manager", "superAdmin"]).get();
+    const messages = [];
+    const uids = [];
+    adminsSnap.forEach((adminDoc) => {
+      const token = adminDoc.data().fcmToken;
+      if (token) {
+        messages.push({
+          token,
+          notification: {
+            title: "💰 UTR Submitted — Verify Payment",
+            body: `Order #${orderId.slice(-6).toUpperCase()} | UTR: ${trimmedUtr} | ₹${order.finalAmount}`,
+          },
+          data: { orderId, type: "utr_submitted" },
+          android: {
+            priority: "high",
+            notification: { channelId: "default", priority: "max", defaultSound: true, defaultVibrateTimings: true },
+          },
+        });
+        uids.push(adminDoc.id);
+      }
     });
 
-    if (tokens.length > 0) {
-      const messages = tokens.map((token) => ({
-        token,
-        notification: {
-          title: "💰 UTR Submitted — Verify Payment",
-          body: `Order #${orderId.slice(-6).toUpperCase()} | UTR: ${trimmedUtr} | ₹${order.finalAmount}`,
-        },
-        data: { orderId, type: "utr_submitted" },
-      }));
-      await Promise.all(messages.map((msg) => getMessaging().send(msg)));
+    if (messages.length > 0) {
+      await Promise.all(messages.map((msg, i) => sendPushNotification(msg, uids[i])));
     }
   } catch (e) { console.error("Admin notify error:", e); }
 
@@ -930,13 +970,17 @@ exports.verifyQrPayment = onCall(async (request) => {
       const userDoc = await db.doc(`users/${order.userId}`).get();
       const fcmToken = userDoc.data()?.fcmToken;
       if (fcmToken) {
-        await getMessaging().send({
+        await sendPushNotification({
           token: fcmToken,
           notification: {
             title: "✅ Payment Verified!",
             body: `Your payment for order #${orderId.slice(-6).toUpperCase()} has been confirmed.`,
-          }
-        });
+          },
+          android: {
+            priority: "high",
+            notification: { channelId: "default", defaultSound: true },
+          },
+        }, order.userId);
       }
     } catch (e) { console.error("Notify error:", e); }
 
@@ -964,13 +1008,17 @@ exports.verifyQrPayment = onCall(async (request) => {
       const userDoc = await db.doc(`users/${order.userId}`).get();
       const fcmToken = userDoc.data()?.fcmToken;
       if (fcmToken) {
-        await getMessaging().send({
+        await sendPushNotification({
           token: fcmToken,
           notification: {
             title: "❌ Payment Not Verified",
             body: `Order #${orderId.slice(-6).toUpperCase()}: ${rejectReason || "Please re-submit your UTR."}`,
-          }
-        });
+          },
+          android: {
+            priority: "high",
+            notification: { channelId: "default", defaultSound: true },
+          },
+        }, order.userId);
       }
     } catch (e) { console.error("Notify error:", e); }
 
@@ -989,28 +1037,34 @@ exports.onKycSubmitted = onDocumentUpdated("users/{userId}", async (event) => {
   if (after.verificationStatus !== "pending") return null;
 
   try {
-    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
-    const tokens = [];
-    adminsSnap.forEach((doc) => {
-      const token = doc.data().fcmToken;
-      if (token) tokens.push(token);
+    const adminsSnap = await db.collection("users").where("role", "in", ["admin", "manager", "superAdmin"]).get();
+    const messages = [];
+    const uids = [];
+    adminsSnap.forEach((adminDoc) => {
+      const token = adminDoc.data().fcmToken;
+      if (token) {
+        messages.push({
+          token,
+          notification: {
+            title: "🆔 New KYC Request",
+            body: `${after.name || after.phone} submitted KYC for verification`,
+          },
+          data: {
+            userId: event.params.userId,
+            type: "kyc_request",
+          },
+          android: {
+            priority: "high",
+            notification: { channelId: "default", priority: "max", defaultSound: true, defaultVibrateTimings: true },
+          },
+        });
+        uids.push(adminDoc.id);
+      }
     });
 
-    if (tokens.length > 0) {
-      const messages = tokens.map((token) => ({
-        token,
-        notification: {
-          title: "🆔 New KYC Request",
-          body: `${after.name || after.phone} submitted KYC for verification`,
-        },
-        data: {
-          userId: event.params.userId,
-          type: "kyc_request",
-        },
-      }));
-
-      await Promise.all(messages.map((msg) => getMessaging().send(msg)));
-      console.log(`✅ KYC notification sent to ${tokens.length} admins`);
+    if (messages.length > 0) {
+      await Promise.all(messages.map((msg, i) => sendPushNotification(msg, uids[i])));
+      console.log(`✅ KYC notification sent to ${messages.length} admins`);
     }
   } catch (err) {
     console.error("Error sending KYC notification:", err);
@@ -1140,29 +1194,35 @@ exports.onBulkBookingCreated = onDocumentCreated("bulkBookings/{bookingId}", asy
   console.log(`📦 New bulk booking created: ${bookingId} by ${data.userName}`);
 
   try {
-    const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
-    const tokens = [];
-    adminsSnap.forEach((doc) => {
-      const token = doc.data().fcmToken;
-      if (token) tokens.push(token);
+    const adminsSnap = await db.collection("users").where("role", "in", ["admin", "manager", "superAdmin"]).get();
+    const messages = [];
+    const uids = [];
+    adminsSnap.forEach((adminDoc) => {
+      const token = adminDoc.data().fcmToken;
+      if (token) {
+        const typeLabel = data.type === 'function' ? 'Function/Event' : 'Bulk';
+        messages.push({
+          token,
+          notification: {
+            title: `📋 New ${typeLabel} Booking!`,
+            body: `${data.userName} • ${data.peopleCount} ppl • ${data.quantityRequirement || 'Custom'} • ${new Date(data.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
+          },
+          data: {
+            bookingId: bookingId,
+            type: "bulk_booking_new",
+          },
+          android: {
+            priority: "high",
+            notification: { channelId: "default", priority: "max", defaultSound: true, defaultVibrateTimings: true },
+          },
+        });
+        uids.push(adminDoc.id);
+      }
     });
 
-    if (tokens.length > 0) {
-      const typeLabel = data.type === 'function' ? 'Function/Event' : 'Bulk';
-      const messages = tokens.map((token) => ({
-        token,
-        notification: {
-          title: `📋 New ${typeLabel} Booking!`,
-          body: `${data.userName} • ${data.peopleCount} ppl • ${data.quantityRequirement || 'Custom'} • ${new Date(data.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`,
-        },
-        data: {
-          bookingId: bookingId,
-          type: "bulk_booking_new",
-        },
-      }));
-
-      await Promise.all(messages.map((msg) => getMessaging().send(msg)));
-      console.log(`✅ Admin notified of new bulk booking (${tokens.length} admins)`);
+    if (messages.length > 0) {
+      await Promise.all(messages.map((msg, i) => sendPushNotification(msg, uids[i])));
+      console.log(`✅ Admin notified of new bulk booking (${messages.length} admins)`);
     }
   } catch (err) {
     console.error("Error sending bulk booking notification:", err);
@@ -1200,14 +1260,18 @@ exports.onBulkBookingStatusChange = onDocumentUpdated("bulkBookings/{bookingId}"
 
         const notification = statusMessages[after.status];
         if (notification) {
-          await getMessaging().send({
+          await sendPushNotification({
             token: fcmToken,
             notification,
             data: {
               bookingId: bookingId,
               type: "bulk_booking_update",
             },
-          });
+            android: {
+              priority: "high",
+              notification: { channelId: "default", defaultSound: true },
+            },
+          }, after.userId);
           console.log(`✅ Customer notified of bulk booking status change`);
         }
       }
@@ -1219,27 +1283,33 @@ exports.onBulkBookingStatusChange = onDocumentUpdated("bulkBookings/{bookingId}"
   // 2. Notify admins when customer pays advance (status → confirmed from awaiting_payment)
   if (after.status === 'confirmed' && before.status === 'awaiting_payment') {
     try {
-      const adminsSnap = await db.collection("users").where("role", "==", "admin").get();
-      const tokens = [];
-      adminsSnap.forEach((doc) => {
-        const token = doc.data().fcmToken;
-        if (token) tokens.push(token);
+      const adminsSnap = await db.collection("users").where("role", "in", ["admin", "manager", "superAdmin"]).get();
+      const messages = [];
+      const uids = [];
+      adminsSnap.forEach((adminDoc) => {
+        const token = adminDoc.data().fcmToken;
+        if (token) {
+          messages.push({
+            token,
+            notification: {
+              title: "💰 Advance Payment Received!",
+              body: `${after.userName} paid ₹${(after.advanceAmount || 0).toLocaleString()} for booking #${bookingId.slice(-6)}`,
+            },
+            data: {
+              bookingId: bookingId,
+              type: "bulk_booking_paid",
+            },
+            android: {
+              priority: "high",
+              notification: { channelId: "default", priority: "max", defaultSound: true, defaultVibrateTimings: true },
+            },
+          });
+          uids.push(adminDoc.id);
+        }
       });
 
-      if (tokens.length > 0) {
-        const messages = tokens.map((token) => ({
-          token,
-          notification: {
-            title: "💰 Advance Payment Received!",
-            body: `${after.userName} paid ₹${(after.advanceAmount || 0).toLocaleString()} for booking #${bookingId.slice(-6)}`,
-          },
-          data: {
-            bookingId: bookingId,
-            type: "bulk_booking_paid",
-          },
-        }));
-
-        await Promise.all(messages.map((msg) => getMessaging().send(msg)));
+      if (messages.length > 0) {
+        await Promise.all(messages.map((msg, i) => sendPushNotification(msg, uids[i])));
         console.log(`✅ Admin notified of advance payment`);
       }
     } catch (err) {

@@ -1403,3 +1403,396 @@ exports.fixStuckReferrals = onCall(async (request) => {
   console.log(`🎁 fixStuckReferrals complete: ${results.fixed} fixed, ${results.skipped} skipped, ${results.errors} errors`);
   return results;
 });
+
+// ─── COIN WITHDRAWAL SYSTEM ──────────────────────────────────────────────────
+
+// ─── Cloud Function: Request Withdrawal (User-Side) ──────────────────────────
+exports.requestWithdrawal = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in to request withdrawal.");
+  }
+
+  const uid = request.auth.uid;
+  const data = request.data;
+  const { upiId, accountName, coinsToWithdraw } = data;
+
+  // ─── Validate UPI ID format ─────────────────────────────────────────────
+  const upiRegex = /^[\w.\-]+@[\w]+$/;
+  const phoneRegex = /^\d{10}$/;
+  if (!upiId || (!upiRegex.test(upiId) && !phoneRegex.test(upiId))) {
+    throw new HttpsError("invalid-argument", "Invalid UPI ID. Must be a valid UPI address (e.g. name@upi) or a 10-digit phone number.");
+  }
+
+  if (!accountName || typeof accountName !== "string" || accountName.trim().length === 0) {
+    throw new HttpsError("invalid-argument", "Account name is required.");
+  }
+
+  // ─── Validate minimum coins ─────────────────────────────────────────────
+  if (!coinsToWithdraw || typeof coinsToWithdraw !== "number" || coinsToWithdraw < 100) {
+    throw new HttpsError("invalid-argument", "Minimum withdrawal is 100 coins.");
+  }
+
+  // ─── Check for existing pending withdrawal ─────────────────────────────
+  const pendingCheck = await db.collection("withdrawalRequests")
+    .where("userId", "==", uid)
+    .where("status", "==", "pending")
+    .limit(1)
+    .get();
+
+  if (!pendingCheck.empty) {
+    throw new HttpsError("already-exists", "You already have a pending withdrawal request. Please wait for it to be processed.");
+  }
+
+  // ─── Transaction: deduct coins & lock them ─────────────────────────────
+  let requestId;
+  let userData;
+
+  await db.runTransaction(async (transaction) => {
+    const userRef = db.doc(`users/${uid}`);
+    const userSnap = await transaction.get(userRef);
+
+    if (!userSnap.exists) {
+      throw new HttpsError("not-found", "User not found.");
+    }
+
+    userData = userSnap.data();
+
+    if ((userData.coins || 0) < coinsToWithdraw) {
+      throw new HttpsError("failed-precondition", `Insufficient coins. You have ${userData.coins || 0} coins but requested ${coinsToWithdraw}.`);
+    }
+
+    // Deduct from available coins and add to locked coins
+    transaction.update(userRef, {
+      coins: userData.coins - coinsToWithdraw,
+      lockedCoins: (userData.lockedCoins || 0) + coinsToWithdraw,
+    });
+  });
+
+  // ─── Create withdrawal request doc ─────────────────────────────────────
+  const now = new Date().toISOString();
+  const requestRef = await db.collection("withdrawalRequests").add({
+    userId: uid,
+    userName: userData.name || "",
+    userPhone: userData.phone || "",
+    upiId,
+    accountName,
+    coinsRequested: coinsToWithdraw,
+    amountRequested: coinsToWithdraw * COIN_VALUE,
+    status: "pending",
+    requestedAt: now,
+  });
+  requestId = requestRef.id;
+
+  // ─── Audit trail ───────────────────────────────────────────────────────
+  await db.collection("withdrawalTransactions").add({
+    userId: uid,
+    type: "lock",
+    coins: coinsToWithdraw,
+    beforeBalance: userData.coins,
+    afterBalance: userData.coins - coinsToWithdraw,
+    beforeLocked: userData.lockedCoins || 0,
+    afterLocked: (userData.lockedCoins || 0) + coinsToWithdraw,
+    referenceId: requestRef.id,
+    timestamp: now,
+  });
+
+  // ─── Notify admins ─────────────────────────────────────────────────────
+  try {
+    const adminsSnap = await db.collection("users")
+      .where("role", "in", ["admin", "manager", "superAdmin"])
+      .get();
+
+    const messages = [];
+    adminsSnap.forEach((doc) => {
+      const token = doc.data().fcmToken;
+      if (token) {
+        messages.push({
+          token,
+          notification: {
+            title: "💸 New Withdrawal Request",
+            body: `${userData.name || userData.phone || uid} requested ₹${coinsToWithdraw * COIN_VALUE} (${coinsToWithdraw} coins)`,
+          },
+          data: {
+            requestId: requestRef.id,
+            type: "withdrawal_request",
+          },
+        });
+      }
+    });
+
+    if (messages.length > 0) {
+      await Promise.all(messages.map((msg) => sendPushNotification(msg, msg.token)));
+      console.log(`[FCM] Withdrawal request notification sent to ${messages.length} admins`);
+    }
+  } catch (err) {
+    console.error("[FCM] Error sending withdrawal request notifications:", err);
+  }
+
+  console.log(`[EVENT: withdrawalRequested] User ${uid} requested withdrawal of ${coinsToWithdraw} coins (₹${coinsToWithdraw * COIN_VALUE})`);
+  return { success: true, requestId };
+});
+
+// ─── Cloud Function: Approve Withdrawal (Admin-Only) ─────────────────────────
+exports.approveWithdrawal = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  // ─── Admin role check ──────────────────────────────────────────────────
+  const callerDoc = await db.doc(`users/${request.auth.uid}`).get();
+  if (!callerDoc.exists || !["admin", "manager", "superAdmin"].includes(callerDoc.data().role)) {
+    throw new HttpsError("permission-denied", "Only admins can approve withdrawals.");
+  }
+
+  const { requestId } = request.data;
+  if (!requestId) {
+    throw new HttpsError("invalid-argument", "requestId is required.");
+  }
+
+  // ─── Read and validate withdrawal request ──────────────────────────────
+  const requestRef = db.doc(`withdrawalRequests/${requestId}`);
+  const requestDoc = await requestRef.get();
+
+  if (!requestDoc.exists) {
+    throw new HttpsError("not-found", "Withdrawal request not found.");
+  }
+
+  const requestData = requestDoc.data();
+  if (requestData.status !== "pending") {
+    throw new HttpsError("failed-precondition", `Cannot approve a request with status '${requestData.status}'. Only pending requests can be approved.`);
+  }
+
+  // ─── Update status to approved ─────────────────────────────────────────
+  const now = new Date().toISOString();
+  await requestRef.update({
+    status: "approved",
+    approvedAt: now,
+    approvedBy: request.auth.uid,
+  });
+
+  // ─── Notify user ───────────────────────────────────────────────────────
+  try {
+    const userDoc = await db.doc(`users/${requestData.userId}`).get();
+    if (userDoc.exists) {
+      const fcmToken = userDoc.data().fcmToken;
+      if (fcmToken) {
+        await sendPushNotification({
+          token: fcmToken,
+          notification: {
+            title: "✅ Withdrawal Approved!",
+            body: `Your withdrawal of ₹${requestData.amountRequested} has been approved. Payment will be processed shortly.`,
+          },
+          data: {
+            requestId,
+            type: "withdrawal_approved",
+          },
+        }, fcmToken);
+      }
+    }
+  } catch (err) {
+    console.error("[FCM] Error sending withdrawal approval notification:", err);
+  }
+
+  console.log(`[EVENT: withdrawalApproved] Admin ${request.auth.uid} approved withdrawal ${requestId}`);
+  return { success: true };
+});
+
+// ─── Cloud Function: Reject Withdrawal (Admin-Only) ──────────────────────────
+exports.rejectWithdrawal = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  // ─── Admin role check ──────────────────────────────────────────────────
+  const callerDoc = await db.doc(`users/${request.auth.uid}`).get();
+  if (!callerDoc.exists || !["admin", "manager", "superAdmin"].includes(callerDoc.data().role)) {
+    throw new HttpsError("permission-denied", "Only admins can reject withdrawals.");
+  }
+
+  const { requestId, remarks } = request.data;
+  if (!requestId) {
+    throw new HttpsError("invalid-argument", "requestId is required.");
+  }
+
+  // ─── Read and validate withdrawal request ──────────────────────────────
+  const requestRef = db.doc(`withdrawalRequests/${requestId}`);
+  const requestDoc = await requestRef.get();
+
+  if (!requestDoc.exists) {
+    throw new HttpsError("not-found", "Withdrawal request not found.");
+  }
+
+  const requestData = requestDoc.data();
+  if (requestData.status !== "pending" && requestData.status !== "approved") {
+    throw new HttpsError("failed-precondition", `Cannot reject a request with status '${requestData.status}'. Only pending or approved requests can be rejected.`);
+  }
+
+  const coinsRequested = requestData.coinsRequested;
+  const userId = requestData.userId;
+
+  // ─── Transaction: unlock coins back to user ────────────────────────────
+  let userDataBefore;
+  await db.runTransaction(async (transaction) => {
+    const userRef = db.doc(`users/${userId}`);
+    const userSnap = await transaction.get(userRef);
+
+    if (!userSnap.exists) {
+      throw new HttpsError("not-found", "User not found.");
+    }
+
+    userDataBefore = userSnap.data();
+
+    transaction.update(userRef, {
+      coins: (userDataBefore.coins || 0) + coinsRequested,
+      lockedCoins: Math.max(0, (userDataBefore.lockedCoins || 0) - coinsRequested),
+    });
+  });
+
+  // ─── Update withdrawal request status ──────────────────────────────────
+  const now = new Date().toISOString();
+  await requestRef.update({
+    status: "rejected",
+    rejectedAt: now,
+    rejectedBy: request.auth.uid,
+    remarks: remarks || "",
+  });
+
+  // ─── Audit trail ───────────────────────────────────────────────────────
+  await db.collection("withdrawalTransactions").add({
+    userId,
+    type: "unlock",
+    coins: coinsRequested,
+    beforeBalance: userDataBefore.coins || 0,
+    afterBalance: (userDataBefore.coins || 0) + coinsRequested,
+    beforeLocked: userDataBefore.lockedCoins || 0,
+    afterLocked: Math.max(0, (userDataBefore.lockedCoins || 0) - coinsRequested),
+    referenceId: requestId,
+    timestamp: now,
+  });
+
+  // ─── Notify user ───────────────────────────────────────────────────────
+  try {
+    const userDoc = await db.doc(`users/${userId}`).get();
+    if (userDoc.exists) {
+      const fcmToken = userDoc.data().fcmToken;
+      if (fcmToken) {
+        await sendPushNotification({
+          token: fcmToken,
+          notification: {
+            title: "❌ Withdrawal Rejected",
+            body: `Your withdrawal of ₹${requestData.amountRequested} was rejected.${remarks ? " Reason: " + remarks : ""} Coins have been returned to your wallet.`,
+          },
+          data: {
+            requestId,
+            type: "withdrawal_rejected",
+          },
+        }, fcmToken);
+      }
+    }
+  } catch (err) {
+    console.error("[FCM] Error sending withdrawal rejection notification:", err);
+  }
+
+  console.log(`[EVENT: withdrawalRejected] Admin ${request.auth.uid} rejected withdrawal ${requestId}`);
+  return { success: true };
+});
+
+// ─── Cloud Function: Mark Withdrawal as Paid (Admin-Only) ────────────────────
+exports.markWithdrawalPaid = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Must be logged in.");
+  }
+
+  // ─── Admin role check ──────────────────────────────────────────────────
+  const callerDoc = await db.doc(`users/${request.auth.uid}`).get();
+  if (!callerDoc.exists || !["admin", "manager", "superAdmin"].includes(callerDoc.data().role)) {
+    throw new HttpsError("permission-denied", "Only admins can mark withdrawals as paid.");
+  }
+
+  const { requestId, remarks } = request.data;
+  if (!requestId) {
+    throw new HttpsError("invalid-argument", "requestId is required.");
+  }
+
+  // ─── Read and validate withdrawal request ──────────────────────────────
+  const requestRef = db.doc(`withdrawalRequests/${requestId}`);
+  const requestDoc = await requestRef.get();
+
+  if (!requestDoc.exists) {
+    throw new HttpsError("not-found", "Withdrawal request not found.");
+  }
+
+  const requestData = requestDoc.data();
+  if (requestData.status !== "approved") {
+    throw new HttpsError("failed-precondition", `Cannot mark as paid. Current status is '${requestData.status}'. Only approved requests can be marked as paid.`);
+  }
+
+  const coinsRequested = requestData.coinsRequested;
+  const userId = requestData.userId;
+  const amount = requestData.amountRequested;
+
+  // ─── Transaction: permanently deduct from lockedCoins ──────────────────
+  let userDataBefore;
+  await db.runTransaction(async (transaction) => {
+    const userRef = db.doc(`users/${userId}`);
+    const userSnap = await transaction.get(userRef);
+
+    if (!userSnap.exists) {
+      throw new HttpsError("not-found", "User not found.");
+    }
+
+    userDataBefore = userSnap.data();
+
+    transaction.update(userRef, {
+      lockedCoins: Math.max(0, (userDataBefore.lockedCoins || 0) - coinsRequested),
+    });
+  });
+
+  // ─── Update withdrawal request status ──────────────────────────────────
+  const now = new Date().toISOString();
+  await requestRef.update({
+    status: "paid",
+    paidAt: now,
+    paidBy: request.auth.uid,
+    remarks: remarks || "",
+  });
+
+  // ─── Audit trail ───────────────────────────────────────────────────────
+  await db.collection("withdrawalTransactions").add({
+    userId,
+    type: "deduct",
+    coins: coinsRequested,
+    beforeBalance: userDataBefore.coins || 0,
+    afterBalance: userDataBefore.coins || 0,
+    beforeLocked: userDataBefore.lockedCoins || 0,
+    afterLocked: Math.max(0, (userDataBefore.lockedCoins || 0) - coinsRequested),
+    referenceId: requestId,
+    timestamp: now,
+  });
+
+  // ─── Notify user ───────────────────────────────────────────────────────
+  try {
+    const userDoc = await db.doc(`users/${userId}`).get();
+    if (userDoc.exists) {
+      const fcmToken = userDoc.data().fcmToken;
+      if (fcmToken) {
+        await sendPushNotification({
+          token: fcmToken,
+          notification: {
+            title: "🎉 Payment Sent!",
+            body: `₹${amount} paid to your UPI! Thank you for using KariKing.`,
+          },
+          data: {
+            requestId,
+            type: "withdrawal_paid",
+          },
+        }, fcmToken);
+      }
+    }
+  } catch (err) {
+    console.error("[FCM] Error sending withdrawal paid notification:", err);
+  }
+
+  console.log(`[EVENT: withdrawalPaid] Admin ${request.auth.uid} marked withdrawal ${requestId} as paid (₹${amount})`);
+  return { success: true };
+});

@@ -356,3 +356,38 @@ export interface RewardCampaign {
   description: string;
   createdAt: string;
 }
+
+// ─── Coin Withdrawal System ──────────────────────────────────────────────────
+export type WithdrawalStatus = 'pending' | 'approved' | 'rejected' | 'paid';
+
+export interface WithdrawalRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userPhone: string;
+  upiId: string;
+  accountName: string;
+  coinsRequested: number;
+  amountRequested: number; // coinsRequested * COIN_VALUE
+  status: WithdrawalStatus;
+  requestedAt: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  paidAt?: string;
+  approvedBy?: string;
+  remarks?: string;
+}
+
+export interface WithdrawalTransaction {
+  id: string;
+  userId: string;
+  type: 'lock' | 'unlock' | 'deduct';
+  coins: number;
+  beforeBalance: number;
+  afterBalance: number;
+  beforeLocked: number;
+  afterLocked: number;
+  referenceId: string; // withdrawal request ID
+  adminUid?: string;
+  timestamp: string;
+}

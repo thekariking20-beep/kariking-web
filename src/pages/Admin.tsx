@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit, getDocs, startAfter, DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
-import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap, Home } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap, Home, Banknote } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -17,12 +17,13 @@ import AdminBookingsTab from '../components/admin/AdminBookingsTab';
 import CategoriesManager from '../components/admin/CategoriesManager';
 import CouponManager from '../components/admin/CouponManager';
 import RewardCampaignManager from '../components/admin/RewardCampaignManager';
+import AdminWithdrawalsTab from '../components/admin/AdminWithdrawalsTab';
 import { useCategories } from '../context/CategoriesContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons' | 'campaigns'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons' | 'campaigns' | 'withdrawals'>('dashboard');
   const { categories: dynamicCategories, getSubCategories: getDynamicSubCategories } = useCategories();
   
   const [revenueData, setRevenueData] = useState<{date: string, amount: number}[]>([]);
@@ -375,6 +376,7 @@ export default function Admin() {
       { id: 'provisioning', label: 'Provisioning', icon: Shield },
       { id: 'verification', label: 'Verification', icon: Truck },
       { id: 'referrals', label: 'Referrals', icon: Gift },
+      { id: 'withdrawals', label: 'Withdrawals', icon: Banknote },
       { id: 'settings', label: 'Settings', icon: Settings }
     ] : [])
   ];
@@ -1193,6 +1195,11 @@ export default function Admin() {
               {/* REWARD CAMPAIGNS MANAGER */}
               {activeTab === 'campaigns' && (
                 <RewardCampaignManager />
+              )}
+
+              {/* COIN WITHDRAWALS MANAGER */}
+              {activeTab === 'withdrawals' && (
+                <AdminWithdrawalsTab />
               )}
             </motion.div>
           </AnimatePresence>

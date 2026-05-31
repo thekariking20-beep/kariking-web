@@ -16,6 +16,9 @@ export const COIN_EARN_THRESHOLD = 500;
 /** Coins earned per COIN_EARN_THRESHOLD spent */
 export const COINS_PER_THRESHOLD = 1;
 
+/** Minimum coins required to request a withdrawal */
+export const MIN_WITHDRAWAL_COINS = 100; // 100 coins = ₹2000
+
 /** Format a coin amount to rupee value string */
 export function coinToRupee(coins: number): string {
   return `₹${coins * COIN_VALUE}`;

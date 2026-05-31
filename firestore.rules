@@ -188,5 +188,23 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isDashboardUser();
     }
+
+    // ─── Withdrawal Requests ─────────────────────────────────────────────
+    // Users can read their own withdrawal requests.
+    // Admins/Managers can read all for management dashboard.
+    // All state changes (create, approve, reject, pay) happen via Cloud Functions.
+    match /withdrawalRequests/{requestId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isDashboardUser();
+      allow write: if false; // Only written via Cloud Functions
+    }
+
+    // ─── Withdrawal Transactions (Audit Log) ─────────────────────────────
+    // Read-only for the owning user and admins. All writes via Cloud Functions.
+    match /withdrawalTransactions/{txId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isDashboardUser();
+      allow write: if false; // Only written via Cloud Functions
+    }
   }
 }

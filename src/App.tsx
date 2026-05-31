@@ -25,6 +25,7 @@ const UserOnboarding = React.lazy(() => import('./pages/UserOnboarding'));
 const VerificationPending = React.lazy(() => import('./pages/VerificationPending'));
 const DeliveryDashboard = React.lazy(() => import('./pages/DeliveryDashboard'));
 const DeliveryProfile = React.lazy(() => import('./pages/DeliveryProfile'));
+const Wallet = React.lazy(() => import('./pages/Wallet'));
 
 // ─── Protected Route — auth + role gating ─────────────────────────────────────
 function ProtectedRoute({ 
@@ -143,6 +144,11 @@ export default function App() {
               <Route path="/referral" element={
                 <ProtectedRoute>
                   <Referral />
+                </ProtectedRoute>
+              } />
+              <Route path="/wallet" element={
+                <ProtectedRoute>
+                  <Wallet />
                 </ProtectedRoute>
               } />
               <Route path="/bookings" element={

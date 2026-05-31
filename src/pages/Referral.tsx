@@ -354,14 +354,14 @@ export default function Referral() {
         <div className="flex-1 text-center md:text-left">
           <h3 className="text-xl font-bold text-yellow-900 mb-2">1 Coin = ₹20</h3>
           <p className="text-yellow-700 text-sm mb-6">
-            Use your earned coins to get massive discounts on your favorite meat and poultry products. 
-            No limits on how many friends you can refer!
+            Use your earned coins to get massive discounts on your favorite meat and poultry products, 
+            or withdraw them as real money from your wallet!
           </p>
           <Link
-            to="/products"
+            to="/wallet"
             className="inline-flex items-center gap-2 text-yellow-800 font-bold hover:gap-3 transition-all"
           >
-            Start Shopping <ArrowRight className="w-5 h-5" />
+            Go to Wallet <ArrowRight className="w-5 h-5" />
           </Link>
         </div>
       </section>

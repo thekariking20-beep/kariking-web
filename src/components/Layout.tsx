@@ -22,7 +22,6 @@ export default function Layout() {
     { name: 'Products',  path: '/products', hideForDelivery: true },
     { name: 'Orders',    path: '/orders',   protected: true, hideForDelivery: true },
     { name: 'Referral',  path: '/referral', protected: true, hideForDelivery: true },
-    { name: 'Wallet',    path: '/wallet',   protected: true, hideForDelivery: true },
     { name: 'Admin',     path: '/admin',    adminOnly: true  },
     { name: 'Dashboard', path: '/admin',    managerOnly: true },
     { name: 'Deliveries',path: '/delivery', deliveryOnly: true },

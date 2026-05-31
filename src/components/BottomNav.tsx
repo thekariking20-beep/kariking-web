@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Home, Drumstick, CalendarDays, Wallet2, ShoppingCart, LayoutDashboard } from 'lucide-react';
+import { Home, Drumstick, CalendarDays, Tag, ShoppingCart, LayoutDashboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { cn } from '../lib/utils';
@@ -19,7 +19,7 @@ const TABS: TabDef[] = [
   { label: 'Home',     path: '/',         icon: Home,          active: (p) => p === '/'        },
   { label: 'Meats',    path: '/products', icon: Drumstick,     active: (p) => p === '/products' },
   { label: 'Bookings', path: '/bookings', icon: CalendarDays,  active: (p) => p === '/bookings', needsAuth: true },
-  { label: 'Wallet',   path: '/wallet',   icon: Wallet2,       active: (p) => p === '/wallet', needsAuth: true },
+  { label: 'Deals',    path: '/referral', icon: Tag,           active: (p) => p === '/referral', needsAuth: true },
   { label: 'Cart',     path: '/cart',     icon: ShoppingCart,  active: (p) => p === '/cart'   },
   { label: 'Admin',    path: '/admin',    icon: LayoutDashboard, active: (p) => p === '/admin', adminOnly: true },
 ];

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, MapPin, Bell, CreditCard, Gift, ClipboardList,
-  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Check, Trash2
+  Phone, LogOut, ChevronRight, Crown, Coins, Package, Edit3, Shield, X, Check, Trash2, Wallet
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
@@ -145,6 +145,7 @@ export default function Profile() {
         { icon: MapPin, label: 'Manage Addresses', desc: 'Add or edit delivery addresses', action: () => navigate('/profile/addresses') },
         { icon: ClipboardList, label: 'Order History', desc: 'View all past orders', action: () => navigate('/orders') },
         { icon: Gift, label: 'Referral & Earnings', desc: 'Invite friends, earn coins', action: () => navigate('/referral') },
+        { icon: Wallet, label: 'Kari Wallet', desc: 'Withdraw coins to real money', action: () => navigate('/wallet') },
       ]
     },
     {

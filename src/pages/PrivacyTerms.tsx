@@ -80,7 +80,7 @@ export default function PrivacyTerms() {
             <Shield className="w-7 h-7 text-white" />
           </div>
           <h2 className="text-2xl font-black text-gray-900">Legal Policies</h2>
-          <p className="text-xs text-gray-400 mt-1.5 font-medium">Last updated: April 13, 2026</p>
+          <p className="text-xs text-gray-400 mt-1.5 font-medium">Last updated: May 31, 2026</p>
         </div>
 
         {/* ── Tab Switcher ──────────────────────────────────────────── */}
@@ -253,9 +253,9 @@ export default function PrivacyTerms() {
               <p>Kari King supports the following payment methods:</p>
               <ul className="list-disc pl-5 space-y-1.5">
                 <li><strong>UPI QR Payment:</strong> Scan the QR code and pay via any UPI app (GPay, PhonePe, Paytm). Submit your 12-digit UTR for manual verification by our team.</li>
+                <li><strong>Cash on Delivery (COD):</strong> Pay in cash directly to the delivery partner upon receiving your order.</li>
                 <li><strong>Kari Coins:</strong> Use earned loyalty coins (1 coin = ₹20 value) to partially or fully pay for orders.</li>
               </ul>
-              <p className="font-bold text-gray-700">Cash on Delivery (COD) is NOT available.</p>
               <p>All prices are in Indian Rupees (₹) and inclusive of applicable taxes unless stated otherwise.</p>
             </Section>
 

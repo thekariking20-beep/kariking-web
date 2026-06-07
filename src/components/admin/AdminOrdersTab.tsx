@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown, Banknote } from 'lucide-react';
+import { ShoppingCart, Package, PartyPopper, QrCode, CheckCircle2, XCircle, Clock, CreditCard, Zap, Coins, FileDown, Banknote, Eye, X, Copy, MapPin, Calendar, ExternalLink } from 'lucide-react';
+import { COIN_VALUE } from '../../config/coins';
 import { Order, User, BulkBooking } from '../../types';
 import { db } from '../../firebase';
 import { downloadInvoice, resolveCustomerName } from '../../lib/invoiceGenerator';
@@ -148,15 +149,214 @@ function QrVerifyActions({ orderId }: { orderId: string }) {
   );
 }
 
+// ─── Quantity Formatter ──────────────────────────────────────────────────
+function formatQty(qty: number, unit?: string): string {
+  if (unit === 'gram') {
+    if (qty >= 1000 && qty % 1000 === 0) return `${qty / 1000} kg`;
+    if (qty >= 1000) return `${(qty / 1000).toFixed(2)} kg`;
+    return `${qty} g`;
+  }
+  if (unit === 'kg') return `${qty} kg`;
+  if (unit === 'piece') return `${qty} pcs`;
+  if (unit === 'litre') return `${qty} L`;
+  return `${qty}`;
+}
+
+// ─── Order Details Modal ─────────────────────────────────────────────────
+function OrderDetailsModal({ order, onClose }: { order: Order; onClose: () => void }) {
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    });
+  };
+
+  // ─── Pricing computations (mirrors invoiceGenerator.ts) ───
+  const deliveryCharge = order.deliveryCharge ?? 0;
+  const coinDiscount = order.coinsDiscountAmount || (order.coinsUsed > 0 ? order.coinsUsed * COIN_VALUE : 0);
+  const totalSavings = (order.couponDiscount || 0) + coinDiscount + (deliveryCharge === 0 && order.totalAmount >= 500 ? 40 : 0);
+
+  // ─── Status color map ───
+  const statusColors: Record<string, string> = {
+    'Order Placed':   'bg-blue-100 text-blue-700 border-blue-200',
+    'Order Received': 'bg-indigo-100 text-indigo-700 border-indigo-200',
+    'Packed':         'bg-purple-100 text-purple-700 border-purple-200',
+    'Dispatched':     'bg-sky-100 text-sky-700 border-sky-200',
+    'Delivered':      'bg-emerald-100 text-emerald-700 border-emerald-200',
+    'Cancelled':      'bg-red-100 text-red-700 border-red-200',
+  };
+
+  const paymentLabels: Record<string, string> = {
+    qr: 'UPI QR Payment',
+    coins: 'Kari Coins',
+    cod: 'Cash on Delivery',
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* ═══ HEADER ═══ */}
+        <div className="bg-gradient-to-r from-red-700 to-red-600 px-5 py-4 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="text-white font-black text-base tracking-wide">Order Details</h3>
+            <p className="text-red-200 text-[10px] font-bold uppercase tracking-widest mt-0.5">#{order.id.slice(-8).toUpperCase()}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center transition-colors"
+          >
+            <X className="w-5 h-5 text-white" />
+          </button>
+        </div>
+
+        {/* ═══ SCROLLABLE CONTENT ═══ */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* ─── Order Info Bar ─── */}
+          <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex flex-wrap items-center gap-2">
+            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${statusColors[order.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+              {order.status}
+            </span>
+            <PaymentBadge method={order.paymentMethod} status={order.paymentStatus} />
+            <span className="ml-auto flex items-center gap-1 text-[10px] text-gray-400 font-medium">
+              <Calendar className="w-3 h-3" />
+              {new Date(order.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          {/* ─── Customer Info ─── */}
+          <div className="px-5 py-3 border-b border-gray-100">
+            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-2">Customer</p>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-4 h-4 text-red-500" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-gray-900 text-sm truncate">{order.phone}</p>
+                  <p className="text-[10px] text-gray-400 truncate flex items-center gap-1">
+                    <MapPin className="w-3 h-3 shrink-0" />{order.address}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => copyToClipboard(order.phone, 'phone')}
+                  className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors"
+                  title="Copy phone"
+                >
+                  <Copy className="w-3 h-3 text-gray-500" />
+                </button>
+                <button
+                  onClick={() => copyToClipboard(order.id, 'orderId')}
+                  className="w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors"
+                  title="Copy order ID"
+                >
+                  <ExternalLink className="w-3 h-3 text-gray-500" />
+                </button>
+              </div>
+            </div>
+            {copiedField && (
+              <p className="text-[9px] font-bold text-green-600 mt-1 text-right">✓ {copiedField === 'phone' ? 'Phone' : 'Order ID'} copied</p>
+            )}
+          </div>
+
+          {/* ─── Items List ─── */}
+          <div className="px-5 py-3">
+            <p className="text-[9px] font-black uppercase tracking-widest text-gray-400 mb-3">Items ({order.items.length})</p>
+            <div className="space-y-2.5">
+              {order.items.map((item, idx) => {
+                const lineTotal = Math.round((item.quantity / (item.baseWeight || 1)) * item.sellingPrice);
+                return (
+                  <div key={`${item.productId}-${idx}`} className="flex items-center gap-3 p-2.5 bg-gray-50 rounded-xl border border-gray-100 hover:border-gray-200 transition-colors">
+                    <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center shrink-0 text-lg">
+                      🍗
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-900 text-sm truncate">{item.name}</p>
+                      <p className="text-[10px] text-gray-400 font-medium">
+                        {formatQty(item.quantity, item.unitType)} × ₹{item.sellingPrice}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-black text-gray-900 text-sm">₹{lineTotal}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ═══ STICKY SUMMARY FOOTER ═══ */}
+        <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-3 space-y-1.5">
+          {/* Subtotal */}
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-500 font-medium">Subtotal</span>
+            <span className="text-gray-900 font-bold">₹{order.totalAmount}</span>
+          </div>
+
+          {/* Coupon Discount */}
+          {order.couponDiscount && order.couponDiscount > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500 font-medium">Coupon{order.couponCode ? ` (${order.couponCode})` : ''}</span>
+              <span className="text-green-600 font-bold">−₹{order.couponDiscount}</span>
+            </div>
+          )}
+
+          {/* Coins Redeemed */}
+          {order.coinsUsed > 0 && (
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-500 font-medium">🪙 Coins ({order.coinsUsed})</span>
+              <span className="text-green-600 font-bold">−₹{coinDiscount}</span>
+            </div>
+          )}
+
+          {/* Delivery Charge */}
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-500 font-medium">Delivery</span>
+            <span className={`font-bold ${deliveryCharge === 0 ? 'text-green-600' : 'text-gray-900'}`}>
+              {deliveryCharge === 0 ? 'FREE' : `₹${deliveryCharge}`}
+            </span>
+          </div>
+
+          {/* Total Savings */}
+          {totalSavings > 0 && (
+            <div className="flex justify-between text-xs bg-green-50 -mx-5 px-5 py-1.5 border-y border-green-100">
+              <span className="text-green-700 font-bold">💰 Total Savings</span>
+              <span className="text-green-700 font-black">₹{totalSavings}</span>
+            </div>
+          )}
+
+          {/* Grand Total */}
+          <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+            <span className="text-gray-900 font-black text-sm">Total Paid</span>
+            <span className="text-red-700 font-black text-xl">₹{order.finalAmount || order.totalAmount}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 // ─── Order Card Component ────────────────────────────────────────────────
-function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrderStatus, accentColor }: {
+function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrderStatus, accentColor, onViewDetails }: {
   key?: React.Key;
   order: Order;
   deliveryPartners: User[];
   assignDeliveryPartner: (orderId: string, partnerId: string) => Promise<void>;
   updateOrderStatus: (orderId: string, newStatus: Order['status']) => Promise<void>;
   accentColor: string;
+  onViewDetails: (order: Order) => void;
 }) {
   const isUnderReview = order.paymentMethod === 'qr' && order.paymentStatus === 'under_review';
 
@@ -243,6 +443,14 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
           ));
         })()}
       </select>
+      {/* View Items Button */}
+      <button
+        onClick={() => onViewDetails(order)}
+        className={`w-full mt-2 flex items-center justify-center gap-1.5 bg-gradient-to-r from-gray-700 to-gray-800 text-white py-2.5 rounded-xl font-bold text-[11px] uppercase tracking-widest shadow-sm hover:shadow-md active:scale-[0.97] transition-all`}
+      >
+        <Eye className="w-3.5 h-3.5" />
+        View Items ({order.items.length})
+      </button>
       {order.status === 'Delivered' && (
         <button
           onClick={() => downloadInvoice(order, cachedName)}
@@ -257,6 +465,7 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
 }
 
 export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus, loadMoreOrders, hasMoreOrders, loadingMoreOrders }: AdminOrdersTabProps) {
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [bookings, setBookings] = React.useState<BulkBooking[]>([]);
 
   // Real-time listener for the separated Custom Meat Bookings layout
@@ -312,6 +521,7 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
                 assignDeliveryPartner={assignDeliveryPartner} 
                 updateOrderStatus={updateOrderStatus}
                 accentColor="red"
+                onViewDetails={setSelectedOrder}
               />
             ))}
             {orders.filter(o => !o.type || o.type === 'normal').length === 0 && <p className="text-center justify-center text-sm text-gray-400 py-10 font-medium">No normal orders yet</p>}
@@ -403,6 +613,11 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
           </div>
         </div>
       </div>
+
+      {/* ═══ Order Details Modal (lazy-rendered) ═══ */}
+      {selectedOrder && (
+        <OrderDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+      )}
     </div>
   );
 }

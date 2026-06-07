@@ -4,6 +4,7 @@ import { collection, query, where, getDocs, getDoc, setDoc, updateDoc, doc } fro
 import { db } from '../../firebase';
 import { cn } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import bcrypt from 'bcryptjs';
 
 export default function StaffProvisioning() {
   const [phone, setPhone] = useState('');
@@ -36,16 +37,19 @@ export default function StaffProvisioning() {
         const existingDoc = snapshot.docs[0];
         await updateDoc(doc(db, 'users', existingDoc.id), { role: role });
         
-        // Also update/create provisionedStaff entry
+        // Also update/create provisionedStaff entry with default password
+        const defaultHash = await bcrypt.hash('Staff@123', 10);
         const provRef = doc(db, 'provisionedStaff', formattedPhone);
         await setDoc(provRef, {
           phone: formattedPhone,
           role: role,
+          passwordHash: defaultHash,
+          mustChangePassword: true,
           provisionedAt: new Date().toISOString(),
           status: 'claimed' // Already has an account
         }, { merge: true });
 
-        setSuccess(`✅ Updated existing user ${formattedPhone} to ${role.toUpperCase()} role.`);
+        setSuccess(`✅ Updated existing user ${formattedPhone} to ${role.toUpperCase()} role. Default password: Staff@123 (must change on first login).`);
         setPhone('');
         setLoading(false);
         return;
@@ -65,16 +69,19 @@ export default function StaffProvisioning() {
         return;
       }
 
-      // New provision — create entry
+      // New provision — create entry with default password
+      const defaultHash = await bcrypt.hash('Staff@123', 10);
       const docRef = doc(db, 'provisionedStaff', formattedPhone);
       await setDoc(docRef, {
         phone: formattedPhone,
         role: role,
+        passwordHash: defaultHash,
+        mustChangePassword: true,
         provisionedAt: new Date().toISOString(),
         status: 'pending' // pending until they login and claim it
       });
 
-      setSuccess(`Successfully provisioned ${formattedPhone} as ${role.toUpperCase()}! They can now log in via OTP.`);
+      setSuccess(`Successfully provisioned ${formattedPhone} as ${role.toUpperCase()}! Default password: Staff@123 (must change on first login).`);
       setPhone('');
     } catch (err: any) {
       console.error(err);

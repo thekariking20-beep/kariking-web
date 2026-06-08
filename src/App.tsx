@@ -48,7 +48,7 @@ function ProtectedRoute({
   // Master admin always bypasses onboarding/verification gates
   if (!skipProfileCheck && !isDashboardUser) {
     // Staff who haven't completed KYC onboarding
-    if (isStaff && !user.profileComplete && !user.verificationStatus) {
+    if (isStaff && !user.verificationStatus) {
       return <Navigate to="/onboarding" replace />;
     }
     

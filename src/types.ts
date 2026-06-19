@@ -13,6 +13,7 @@ export interface User {
   coins: number;
   lockedCoins: number;
   isAvailable?: boolean;   // delivery partner online/offline toggle
+  isOnline?: boolean;      // delivery partner real-time online status
   fcmToken?: string;       // Firebase Cloud Messaging push token
   selectedAddressId?: string; // Global selected address for the user
   authProvider?: 'otp' | 'password';

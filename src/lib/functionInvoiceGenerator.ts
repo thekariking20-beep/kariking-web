@@ -381,7 +381,7 @@ async function generatePDF(booking: BulkBooking, isInvoice: boolean) {
     // Advance Paid Status
     doc.setTextColor(...grayText);
     doc.text('Advance Paid (50%)', sumLabelX, y);
-    doc.setTextColor(booking.advancePaid ? greenText : brandRed);
+    doc.setTextColor(...(booking.advancePaid ? greenText : brandRed));
     doc.text(`${booking.advancePaid ? 'PAID' : 'PENDING'} ${fmtAmt(booking.advanceAmount)}`, sumValX, y, { align: 'right' });
     y += 5;
 

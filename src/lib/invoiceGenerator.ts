@@ -1,6 +1,7 @@
 // PATCH 5: jsPDF is dynamically imported only when invoice generation is triggered.
 // This removes ~620KB from the initial bundle load.
 import { Order } from '../types';
+import type jsPDF from 'jspdf';
 import { STORE_CONFIG } from '../config/storeConfig';
 import { COIN_VALUE } from '../config/coins';
 import { doc as fbDoc, getDoc } from 'firebase/firestore';
@@ -349,7 +350,7 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
     doc.setTextColor(...grayText);
     doc.text(`Kari Coins (${order.coinsUsed} coin${order.coinsUsed > 1 ? 's' : ''})`, sumLabelX, y);
     doc.setTextColor(...greenText);
-    const coinDiscountAmt = order.coinDiscountAmount || order.coinsUsed * COIN_VALUE;
+    const coinDiscountAmt = order.coinsDiscountAmount || order.coinsUsed * COIN_VALUE;
     doc.text(`-${fmtAmt(coinDiscountAmt)}`, sumValX, y, { align: 'right' });
     y += 6;
   }
@@ -364,7 +365,7 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
 
   // ─── Total Savings Row ─────────────────────────────────────────────────
   const totalSavings = (order.couponDiscount || 0)
-    + ((order.coinDiscountAmount || order.coinsUsed * COIN_VALUE) || 0)
+    + ((order.coinsDiscountAmount || order.coinsUsed * COIN_VALUE) || 0)
     + (deliveryCharge === 0 && order.totalAmount >= 500 ? 40 : 0);
   
   if (totalSavings > 0) {

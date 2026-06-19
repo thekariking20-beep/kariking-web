@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Package, Calendar, MapPin, Users, AlertCircle, Check, X, ClipboardList, Clock, ChevronRight, CheckCircle2, XCircle, CreditCard, Scale, Navigation, IndianRupee, Ban, MessageSquare, QrCode } from 'lucide-react';
+import { Package, Calendar, MapPin, Users, AlertCircle, Check, X, ClipboardList, Clock, ChevronRight, CheckCircle2, XCircle, CreditCard, Scale, Navigation, IndianRupee, Ban, MessageSquare, QrCode, ShoppingCart, Download, Printer } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { collection, addDoc, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';

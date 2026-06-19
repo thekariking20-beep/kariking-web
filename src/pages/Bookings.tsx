@@ -22,6 +22,29 @@ import {
   type FormErrors
 } from '../lib/validation';
 
+// ─── Safe Date Format Helpers ────────────────────────────────────────────────
+const formatDateSafe = (dateStr: string | undefined, options?: Intl.DateTimeFormatOptions) => {
+  if (!dateStr) return 'N/A';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleDateString('en-IN', options);
+  } catch {
+    return 'N/A';
+  }
+};
+
+const formatDateTimeSafe = (dateStr: string | undefined, options?: Intl.DateTimeFormatOptions) => {
+  if (!dateStr) return 'N/A';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return 'N/A';
+    return d.toLocaleString('en-IN', options);
+  } catch {
+    return 'N/A';
+  }
+};
+
 // ─── Status Config ──────────────────────────────────────────────────────────
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ElementType }> = {
   requested:        { label: 'Requested',        color: 'bg-blue-100 text-blue-700',   icon: Clock },
@@ -710,7 +733,7 @@ export default function Bookings() {
                       </p>
                       <p className="text-xs font-bold text-gray-700 mt-1 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                        Req: {new Date(booking.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} • {booking.deliveryTime}
+                        Req: {formatDateSafe(booking.requiredDate, { day: 'numeric', month: 'short' })} • {booking.deliveryTime}
                       </p>
                     </div>
                     <span className={cn("inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm border border-black/5", 
@@ -749,7 +772,7 @@ export default function Bookings() {
                         </div>
                         <div className="flex justify-between">
                           <span>Event Date & Time:</span>
-                          <span>{booking.eventDate ? new Date(booking.eventDate).toLocaleDateString('en-IN') : new Date(booking.requiredDate).toLocaleDateString('en-IN')} @ {booking.eventTime || booking.deliveryTime}</span>
+                          <span>{booking.eventDate ? formatDateSafe(booking.eventDate) : formatDateSafe(booking.requiredDate)} @ {booking.eventTime || booking.deliveryTime}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>Guests Breakdown:</span>
@@ -934,7 +957,7 @@ export default function Bookings() {
                         )}
                         {booking.cancelledAt && (
                           <p className="text-[10px] text-red-400 font-bold">
-                            {new Date(booking.cancelledAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            {formatDateTimeSafe(booking.cancelledAt, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                           </p>
                         )}
                       </div>

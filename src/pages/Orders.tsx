@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, limit } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
@@ -118,9 +118,10 @@ function LiveTimeline({ order }: { order: Order }) {
 export default function Orders() {
   const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [orders, setOrders]           = useState<Order[]>([]);
   const [loading, setLoading]         = useState(true);
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(location.state?.expandOrderId || null);
   const [retryUtr, setRetryUtr] = useState('');
   const [retryingFor, setRetryingFor] = useState<string | null>(null);
   const [retryError, setRetryError] = useState('');

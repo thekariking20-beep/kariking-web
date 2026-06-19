@@ -8,6 +8,13 @@ import { db } from '../firebase';
 import { BulkBooking } from '../types';
 import { cn } from '../lib/utils';
 import { useAddress } from '../context/AddressContext';
+import { downloadQuotation, printQuotation } from '../lib/quotationGenerator';
+import { 
+  downloadFunctionQuotation, 
+  printFunctionQuotation,
+  downloadFunctionInvoice,
+  printFunctionInvoice 
+} from '../lib/functionInvoiceGenerator';
 import {
   validateBookingForm, sanitizeBookingForm,
   validatePeopleCount, validateMeatDetails, validateQuantity,
@@ -47,7 +54,21 @@ export default function Bookings() {
     requiredDate: '',
     deliveryTime: '',
     location: selectedAddress?.fullAddress || user?.address || '',
-    notes: ''
+    notes: '',
+    // Function specific fields
+    functionType: 'Marriage' as 'Marriage' | 'Reception' | 'Birthday' | 'Temple Function' | 'Corporate Event' | 'House Function' | 'Other',
+    eventAddress: '',
+    eventArea: '',
+    eventCity: '',
+    eventPincode: '',
+    eventDate: '',
+    eventTime: '',
+    deliveryDate: '',
+    adultCount: 50,
+    childrenCount: 0,
+    vegCount: 0,
+    nonVegCount: 50,
+    specialInstructions: ''
   });
 
   // Sync address if it changes externally
@@ -89,32 +110,109 @@ export default function Bookings() {
 
     // Run full validation
     const { valid, errors } = validateBookingForm(formData);
-    setFormErrors(errors);
-    // Mark all fields as touched on submit attempt
-    setTouched({ peopleCount: true, meatDetails: true, quantityRequirement: true, requiredDate: true, deliveryTime: true, location: true });
-    if (!valid) return;
+    const eventErrors: typeof errors & Record<string, string> = { ...errors };
+    let isEventValid = valid;
+
+    if (formData.type === 'function') {
+      if (!formData.eventAddress.trim()) {
+        eventErrors.eventAddress = 'Please enter event address';
+        isEventValid = false;
+      }
+      if (!formData.eventArea.trim()) {
+        eventErrors.eventArea = 'Please enter event area';
+        isEventValid = false;
+      }
+      if (!formData.eventCity.trim()) {
+        eventErrors.eventCity = 'Please enter event city';
+        isEventValid = false;
+      }
+      if (!/^\d{6}$/.test(formData.eventPincode)) {
+        eventErrors.eventPincode = 'Pincode must be exactly 6 digits';
+        isEventValid = false;
+      }
+      if (!formData.eventDate) {
+        eventErrors.eventDate = 'Please select event date';
+        isEventValid = false;
+      }
+      if (!formData.eventTime) {
+        eventErrors.eventTime = 'Please select event time';
+        isEventValid = false;
+      }
+      if (formData.adultCount <= 0) {
+        eventErrors.adultCount = 'Adult count must be at least 1';
+        isEventValid = false;
+      }
+    }
+
+    setFormErrors(eventErrors);
+
+    // Touch fields
+    const touchedFields: Record<string, boolean> = {
+      peopleCount: true,
+      meatDetails: true,
+      quantityRequirement: true,
+      requiredDate: true,
+      deliveryTime: true,
+      location: true
+    };
+    if (formData.type === 'function') {
+      touchedFields.eventAddress = true;
+      touchedFields.eventArea = true;
+      touchedFields.eventCity = true;
+      touchedFields.eventPincode = true;
+      touchedFields.eventDate = true;
+      touchedFields.eventTime = true;
+      touchedFields.adultCount = true;
+    }
+    setTouched(touchedFields);
+
+    if (formData.type === 'function' ? !isEventValid : !valid) return;
 
     setSubmitting(true);
     try {
       const now = new Date().toISOString();
       const sanitized = sanitizeBookingForm(formData);
+      
+      const computedPeopleCount = sanitized.type === 'function'
+        ? (formData.adultCount + formData.childrenCount)
+        : sanitized.peopleCount;
+
+      const computedLocation = sanitized.type === 'function'
+        ? [formData.eventAddress, formData.eventArea, formData.eventCity, formData.eventPincode ? `Pin: ${formData.eventPincode}` : ''].filter(Boolean).join(', ')
+        : sanitized.location;
+
       const booking: Omit<BulkBooking, 'id'> = {
         userId: user.uid,
         userName: user.name || 'Customer',
         userPhone: user.phone,
         type: sanitized.type,
-        peopleCount: sanitized.peopleCount,
+        peopleCount: computedPeopleCount,
         meatDetails: sanitized.meatDetails,
         quantityRequirement: sanitized.quantityRequirement,
-        requiredDate: sanitized.requiredDate,
+        requiredDate: sanitized.type === 'function' ? (formData.deliveryDate || sanitized.requiredDate) : sanitized.requiredDate,
         deliveryTime: sanitized.deliveryTime,
-        location: sanitized.location,
+        location: computedLocation,
         notes: sanitized.notes,
         status: 'requested',
         paymentStatus: 'none',
         advancePaid: false,
         createdAt: now,
         updatedAt: now,
+        ...(sanitized.type === 'function' ? {
+          functionType: formData.functionType,
+          eventAddress: formData.eventAddress,
+          eventArea: formData.eventArea,
+          eventCity: formData.eventCity,
+          eventPincode: formData.eventPincode,
+          eventDate: formData.eventDate || sanitized.requiredDate,
+          eventTime: formData.eventTime || sanitized.deliveryTime,
+          deliveryDate: formData.deliveryDate || sanitized.requiredDate,
+          adultCount: formData.adultCount,
+          childrenCount: formData.childrenCount,
+          vegCount: formData.vegCount,
+          nonVegCount: formData.nonVegCount,
+          specialInstructions: formData.specialInstructions,
+        } : {})
       };
       
       await addDoc(collection(db, 'bulkBookings'), booking);
@@ -165,6 +263,34 @@ export default function Bookings() {
       case 'location': {
         const r = validateAddress(formData.location);
         if (!r.valid) newErrors.location = r.error; else delete newErrors.location;
+        break;
+      }
+      case 'eventAddress': {
+        if (!formData.eventAddress.trim()) newErrors.eventAddress = 'Please enter event address'; else delete newErrors.eventAddress;
+        break;
+      }
+      case 'eventArea': {
+        if (!formData.eventArea.trim()) newErrors.eventArea = 'Please enter event area'; else delete newErrors.eventArea;
+        break;
+      }
+      case 'eventCity': {
+        if (!formData.eventCity.trim()) newErrors.eventCity = 'Please enter event city'; else delete newErrors.eventCity;
+        break;
+      }
+      case 'eventPincode': {
+        if (!/^\d{6}$/.test(formData.eventPincode)) newErrors.eventPincode = 'Pincode must be exactly 6 digits'; else delete newErrors.eventPincode;
+        break;
+      }
+      case 'eventDate': {
+        if (!formData.eventDate) newErrors.eventDate = 'Please select event date'; else delete newErrors.eventDate;
+        break;
+      }
+      case 'eventTime': {
+        if (!formData.eventTime) newErrors.eventTime = 'Please select event time'; else delete newErrors.eventTime;
+        break;
+      }
+      case 'adultCount': {
+        if (formData.adultCount <= 0) newErrors.adultCount = 'Adult count must be at least 1'; else delete newErrors.adultCount;
         break;
       }
     }
@@ -305,27 +431,169 @@ export default function Bookings() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {/* People Count */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-[#8B0000]"/> No. of People</label>
-                <input required type="number" min="1" max="5000" placeholder="50" className={cn("w-full p-4 border rounded-2xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-bold text-gray-800", touched.peopleCount && formErrors.peopleCount ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.peopleCount} onChange={e => setFormData({...formData, peopleCount: parseInt(e.target.value) || 0})} onBlur={() => handleBlur('peopleCount')} />
-                {touched.peopleCount && formErrors.peopleCount ? (
-                  <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.peopleCount}</p>
-                ) : (
-                  <p className="text-[9px] text-gray-400 font-bold mt-1">Range: 1–5000 people</p>
-                )}
+            {formData.type === 'bulk' ? (
+              <div className="grid grid-cols-2 gap-4">
+                {/* People Count */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5 text-[#8B0000]"/> No. of People</label>
+                  <input required type="number" min="1" max="5000" placeholder="50" className={cn("w-full p-4 border rounded-2xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-bold text-gray-800", touched.peopleCount && formErrors.peopleCount ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.peopleCount} onChange={e => setFormData({...formData, peopleCount: parseInt(e.target.value) || 0})} onBlur={() => handleBlur('peopleCount')} />
+                  {touched.peopleCount && formErrors.peopleCount ? (
+                    <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.peopleCount}</p>
+                  ) : (
+                    <p className="text-[9px] text-gray-400 font-bold mt-1">Range: 1–5000 people</p>
+                  )}
+                </div>
+                
+                {/* Quantity */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Scale className="w-3.5 h-3.5 text-[#8B0000]"/> Target Quantity</label>
+                  <input required type="text" placeholder="e.g. 20 kg" className={cn("w-full p-4 border rounded-2xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-bold text-gray-800", touched.quantityRequirement && formErrors.quantityRequirement ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.quantityRequirement} onChange={e => setFormData({...formData, quantityRequirement: e.target.value})} onBlur={() => handleBlur('quantityRequirement')} />
+                  {touched.quantityRequirement && formErrors.quantityRequirement && (
+                    <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.quantityRequirement}</p>
+                  )}
+                </div>
               </div>
-              
-              {/* Quantity */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Scale className="w-3.5 h-3.5 text-[#8B0000]"/> Target Quantity</label>
-                <input required type="text" placeholder="e.g. 20 kg" className={cn("w-full p-4 border rounded-2xl bg-gray-50 focus:bg-white focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none font-bold text-gray-800", touched.quantityRequirement && formErrors.quantityRequirement ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.quantityRequirement} onChange={e => setFormData({...formData, quantityRequirement: e.target.value})} onBlur={() => handleBlur('quantityRequirement')} />
-                {touched.quantityRequirement && formErrors.quantityRequirement && (
-                  <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.quantityRequirement}</p>
-                )}
+            ) : (
+              <div className="space-y-4 bg-amber-50/30 p-5 rounded-2xl border border-amber-100/50">
+                <h3 className="text-xs font-black text-amber-800 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                  <Calendar className="w-4 h-4" /> Event Booking Info
+                </h3>
+
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Function Type */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Event Type</label>
+                    <select
+                      className="w-full p-4 border border-gray-200 rounded-2xl bg-white outline-none font-bold text-gray-800 focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                      value={formData.functionType}
+                      onChange={e => setFormData({...formData, functionType: e.target.value as any})}
+                    >
+                      <option value="Marriage">Marriage</option>
+                      <option value="Reception">Reception</option>
+                      <option value="Birthday">Birthday</option>
+                      <option value="Temple Function">Temple Function</option>
+                      <option value="Corporate Event">Corporate Event</option>
+                      <option value="House Function">House Function</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+
+                  {/* Target Quantity */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Scale className="w-3.5 h-3.5 text-amber-600"/> Target Quantity</label>
+                    <input required type="text" placeholder="e.g. 20 kg" className={cn("w-full p-4 border rounded-2xl bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none font-bold text-gray-800", touched.quantityRequirement && formErrors.quantityRequirement ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.quantityRequirement} onChange={e => setFormData({...formData, quantityRequirement: e.target.value})} onBlur={() => handleBlur('quantityRequirement')} />
+                    {touched.quantityRequirement && formErrors.quantityRequirement && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.quantityRequirement}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Guest Breakdown */}
+                <div className="space-y-3">
+                  <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Guest Count Breakdown</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Adults</label>
+                      <input type="number" min="1" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold", touched.adultCount && formErrors.adultCount ? 'border-red-400' : 'border-gray-200')} value={formData.adultCount} onChange={e => setFormData({...formData, adultCount: parseInt(e.target.value) || 0})} onBlur={() => handleBlur('adultCount')} />
+                      {touched.adultCount && formErrors.adultCount && (
+                        <p className="text-[9px] text-red-500 font-bold mt-0.5">{formErrors.adultCount}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Children</label>
+                      <input type="number" min="0" className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none text-xs font-bold" value={formData.childrenCount} onChange={e => setFormData({...formData, childrenCount: parseInt(e.target.value) || 0})} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Veg Guests</label>
+                      <input type="number" min="0" className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none text-xs font-bold" value={formData.vegCount} onChange={e => setFormData({...formData, vegCount: parseInt(e.target.value) || 0})} />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Non-Veg Guests</label>
+                      <input type="number" min="0" className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none text-xs font-bold" value={formData.nonVegCount} onChange={e => setFormData({...formData, nonVegCount: parseInt(e.target.value) || 0})} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Event Date & Time */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Event Date</label>
+                    <input required type="date" min={new Date().toISOString().split('T')[0]} className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventDate && formErrors.eventDate ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventDate} onChange={e => setFormData({...formData, eventDate: e.target.value})} onBlur={() => handleBlur('eventDate')} />
+                    {touched.eventDate && formErrors.eventDate && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1">{formErrors.eventDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Event Time</label>
+                    <input required type="time" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventTime && formErrors.eventTime ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventTime} onChange={e => setFormData({...formData, eventTime: e.target.value})} onBlur={() => handleBlur('eventTime')} />
+                    {touched.eventTime && formErrors.eventTime && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1">{formErrors.eventTime}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Required Delivery Date & Time */}
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Delivery Date</label>
+                    <input required type="date" min={new Date().toISOString().split('T')[0]} className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.requiredDate && formErrors.requiredDate ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.requiredDate} onChange={e => setFormData({...formData, requiredDate: e.target.value})} onBlur={() => handleBlur('requiredDate')} />
+                    {touched.requiredDate && formErrors.requiredDate && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1">{formErrors.requiredDate}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Delivery Time</label>
+                    <input required type="time" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.deliveryTime && formErrors.deliveryTime ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.deliveryTime} onChange={e => setFormData({...formData, deliveryTime: e.target.value})} onBlur={() => handleBlur('deliveryTime')} />
+                    {touched.deliveryTime && formErrors.deliveryTime && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1">{formErrors.deliveryTime}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Venue Address */}
+                <div className="space-y-3 pt-2 border-t border-gray-100">
+                  <span className="block text-[10px] font-black text-gray-400 uppercase tracking-widest">Venue Address</span>
+                  <div>
+                    <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Street Address / Venue Name</label>
+                    <input required type="text" placeholder="e.g. Grand Palace Hall, 1st Cross" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventAddress && formErrors.eventAddress ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventAddress} onChange={e => setFormData({...formData, eventAddress: e.target.value})} onBlur={() => handleBlur('eventAddress')} />
+                    {touched.eventAddress && formErrors.eventAddress && (
+                      <p className="text-[9px] text-red-500 font-bold mt-0.5">{formErrors.eventAddress}</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Area</label>
+                      <input required type="text" placeholder="Anna Nagar" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventArea && formErrors.eventArea ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventArea} onChange={e => setFormData({...formData, eventArea: e.target.value})} onBlur={() => handleBlur('eventArea')} />
+                      {touched.eventArea && formErrors.eventArea && (
+                        <p className="text-[9px] text-red-500 font-bold mt-0.5">{formErrors.eventArea}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">City</label>
+                      <input required type="text" placeholder="Chennai" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventCity && formErrors.eventCity ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventCity} onChange={e => setFormData({...formData, eventCity: e.target.value})} onBlur={() => handleBlur('eventCity')} />
+                      {touched.eventCity && formErrors.eventCity && (
+                        <p className="text-[9px] text-red-500 font-bold mt-0.5">{formErrors.eventCity}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Pincode</label>
+                      <input required type="text" maxLength={6} placeholder="600040" className={cn("w-full p-3 border rounded-xl bg-white outline-none text-xs font-bold text-gray-800", touched.eventPincode && formErrors.eventPincode ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.eventPincode} onChange={e => setFormData({...formData, eventPincode: e.target.value.replace(/\D/g, '')})} onBlur={() => handleBlur('eventPincode')} />
+                      {touched.eventPincode && formErrors.eventPincode && (
+                        <p className="text-[9px] text-red-500 font-bold mt-0.5">{formErrors.eventPincode}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Special Instructions */}
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Special Instructions</label>
+                  <textarea rows={2} placeholder="Catering specifics, preparation style..." className="w-full p-3 border border-gray-200 rounded-xl bg-white outline-none text-xs font-medium resize-none" value={formData.specialInstructions} onChange={e => setFormData({...formData, specialInstructions: e.target.value})} />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Meat Details */}
             <div>
@@ -346,40 +614,44 @@ export default function Bookings() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {/* Date */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Date</label>
-                <input required type="date" min={new Date().toISOString().split('T')[0]} className={cn("w-full p-4 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.requiredDate && formErrors.requiredDate ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.requiredDate} onChange={e => setFormData({...formData, requiredDate: e.target.value})} onBlur={() => handleBlur('requiredDate')} />
-                {touched.requiredDate && formErrors.requiredDate && (
-                  <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.requiredDate}</p>
-                )}
-              </div>
-              {/* Time */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Time</label>
-                <input required type="time" className={cn("w-full p-4 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.deliveryTime && formErrors.deliveryTime ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.deliveryTime} onChange={e => setFormData({...formData, deliveryTime: e.target.value})} onBlur={() => handleBlur('deliveryTime')} />
-                {touched.deliveryTime && formErrors.deliveryTime && (
-                  <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.deliveryTime}</p>
-                )}
-              </div>
-            </div>
+            {formData.type === 'bulk' && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Date */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Date</label>
+                    <input required type="date" min={new Date().toISOString().split('T')[0]} className={cn("w-full p-4 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.requiredDate && formErrors.requiredDate ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.requiredDate} onChange={e => setFormData({...formData, requiredDate: e.target.value})} onBlur={() => handleBlur('requiredDate')} />
+                    {touched.requiredDate && formErrors.requiredDate && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.requiredDate}</p>
+                    )}
+                  </div>
+                  {/* Time */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Time</label>
+                    <input required type="time" className={cn("w-full p-4 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.deliveryTime && formErrors.deliveryTime ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.deliveryTime} onChange={e => setFormData({...formData, deliveryTime: e.target.value})} onBlur={() => handleBlur('deliveryTime')} />
+                    {touched.deliveryTime && formErrors.deliveryTime && (
+                      <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.deliveryTime}</p>
+                    )}
+                  </div>
+                </div>
 
-            {/* Location */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Location</label>
-              <div className="relative">
-                <input required type="text" placeholder="e.g. Anna Nagar, Chennai, Tamil Nadu" className={cn("w-full p-4 pr-12 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.location && formErrors.location ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} onBlur={() => handleBlur('location')} />
-                <button type="button" onClick={() => navigate('/manage-addresses')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-red-100 text-[#8B0000] rounded-xl font-bold shadow-sm active:scale-95">
-                  <Navigation className="w-4 h-4" />
-                </button>
-              </div>
-              {touched.location && formErrors.location ? (
-                <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.location}</p>
-              ) : (
-                <p className="text-[9px] text-gray-400 font-bold mt-1">Include area, city (e.g. "Wisework, Bangalore, Karnataka")</p>
-              )}
-            </div>
+                {/* Location */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1.5"><MapPin className="w-3.5 h-3.5 text-[#8B0000]"/> Delivery Location</label>
+                  <div className="relative">
+                    <input required type="text" placeholder="e.g. Anna Nagar, Chennai, Tamil Nadu" className={cn("w-full p-4 pr-12 border rounded-2xl bg-gray-50 outline-none font-bold text-gray-800", touched.location && formErrors.location ? 'border-red-400 bg-red-50/30' : 'border-gray-200')} value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} onBlur={() => handleBlur('location')} />
+                    <button type="button" onClick={() => navigate('/manage-addresses')} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-red-100 text-[#8B0000] rounded-xl font-bold shadow-sm active:scale-95">
+                      <Navigation className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {touched.location && formErrors.location ? (
+                    <p className="text-[10px] text-red-500 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{formErrors.location}</p>
+                  ) : (
+                    <p className="text-[9px] text-gray-400 font-bold mt-1">Include area, city (e.g. "Wisework, Bangalore, Karnataka")</p>
+                  )}
+                </div>
+              </>
+            )}
 
             {/* Notes */}
             <div>
@@ -434,15 +706,17 @@ export default function Bookings() {
                     <div>
                       <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest flex items-center gap-1.5">
                         {booking.type === 'bulk' ? <Package className="w-3 h-3 text-blue-500" /> : <Users className="w-3 h-3 text-amber-500" />}
-                        {booking.type.toUpperCase()} SPEC #{booking.id.slice(-5)}
+                        {booking.type === 'function' ? 'EVENT SPEC' : 'BULK SPEC'} #{booking.id.slice(-5)}
                       </p>
                       <p className="text-xs font-bold text-gray-700 mt-1 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-gray-400" />
                         Req: {new Date(booking.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} • {booking.deliveryTime}
                       </p>
                     </div>
-                    <span className={cn("inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm border border-black/5", statusCfg.color)}>
-                      <StatusIcon className="w-3 h-3" /> {statusCfg.label}
+                    <span className={cn("inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm border border-black/5", 
+                      booking.type === 'function' && booking.status === 'requested' ? 'bg-blue-100 text-blue-700' : statusCfg.color
+                    )}>
+                      <StatusIcon className="w-3 h-3" /> {booking.type === 'function' && booking.status === 'requested' ? 'Event Requested' : statusCfg.label}
                     </span>
                   </div>
 
@@ -465,6 +739,33 @@ export default function Bookings() {
                         <p className="text-sm font-black text-amber-900">{booking.peopleCount} Pax</p>
                       </div>
                     </div>
+
+                    {/* Event Specific Specs (For history display) */}
+                    {booking.type === 'function' && (
+                      <div className="bg-amber-50/30 rounded-xl p-3 border border-amber-100/50 space-y-1.5 text-xs text-amber-900">
+                        <div className="flex justify-between font-bold">
+                          <span>Event Type:</span>
+                          <span className="text-amber-800">{booking.functionType || 'Catering'}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Event Date & Time:</span>
+                          <span>{booking.eventDate ? new Date(booking.eventDate).toLocaleDateString('en-IN') : new Date(booking.requiredDate).toLocaleDateString('en-IN')} @ {booking.eventTime || booking.deliveryTime}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Guests Breakdown:</span>
+                          <span>{booking.adultCount || booking.peopleCount} Adults | {booking.childrenCount || 0} Children</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Diet:</span>
+                          <span>{booking.vegCount || 0} Veg | {booking.nonVegCount || 0} Non-Veg</span>
+                        </div>
+                        {booking.specialInstructions && (
+                          <div className="pt-1.5 border-t border-amber-100/50 text-[11px] leading-relaxed">
+                            <span className="font-bold">Instructions:</span> {booking.specialInstructions}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Price Tracker Segment */}
@@ -476,13 +777,13 @@ export default function Bookings() {
                         <p className="text-[10px] text-amber-600 mt-1">Admin is reviewing your meat specifications.</p>
                       </div>
                     ) : booking.quotedPrice ? (
-                      <div className="bg-gradient-to-r from-gray-50 to-white border border-gray-100 rounded-xl p-4 shadow-sm">
-                        <div className="flex items-center justify-between mb-4">
+                      <div className="bg-gradient-to-r from-gray-50 to-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
+                        <div className="flex items-center justify-between mb-2">
                           <div>
                             <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Quoted Total</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <IndianRupee className="w-4 h-4 text-green-600" />
-                              <span className="text-lg font-black text-gray-900">{booking.quotedPrice.toLocaleString()}</span>
+                              <span className="text-lg font-black text-gray-900">{(booking.grandTotal || booking.quotedPrice).toLocaleString()}</span>
                             </div>
                           </div>
                           
@@ -503,9 +804,42 @@ export default function Bookings() {
                             </span>
                           )}
                         </div>
+
+                        {/* Itemized Quotation Summary */}
+                        {booking.items && booking.items.length > 0 && (
+                          <div className="bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm">
+                            <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+                              <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-1">
+                                <ShoppingCart className="w-3 h-3" /> Quotation Items ({booking.items.length})
+                              </p>
+                            </div>
+                            <div className="divide-y divide-gray-50 max-h-40 overflow-y-auto">
+                              {booking.items.map((item, idx) => (
+                                <div key={idx} className="px-3 py-2 flex justify-between items-center text-xs">
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-gray-800 truncate">{item.productName}</p>
+                                    <p className="text-[10px] text-gray-500">
+                                      {item.quantity} {item.unitType} × ₹{item.unitPrice.toLocaleString()}
+                                      {(item.discount || 0) > 0 && <span className="text-green-600 ml-1">(-₹{item.discount!.toLocaleString()})</span>}
+                                    </p>
+                                  </div>
+                                  <span className="font-black text-gray-900 ml-2">₹{(item.lineTotal ?? item.subtotal).toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Quotation totals */}
+                            <div className="px-3 py-2 bg-gray-50 border-t border-gray-100 space-y-1 text-[10px]">
+                              <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-bold">₹{(booking.subtotal || 0).toLocaleString()}</span></div>
+                              {(booking.deliveryCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Delivery/Catering</span><span className="font-bold">₹{booking.deliveryCharges!.toLocaleString()}</span></div>}
+                              {(booking.additionalCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Additional</span><span className="font-bold">₹{booking.additionalCharges!.toLocaleString()}</span></div>}
+                              {(booking.globalDiscount || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Discount</span><span className="font-bold text-green-600">-₹{booking.globalDiscount!.toLocaleString()}</span></div>}
+                              <div className="flex justify-between border-t border-gray-200 pt-1 font-bold"><span className="text-gray-700">Grand Total</span><span className="text-[#8B0000]">₹{(booking.grandTotal || booking.quotedPrice).toLocaleString()}</span></div>
+                            </div>
+                          </div>
+                        )}
                         
                         {booking.status === 'awaiting_payment' && (
-                          <div className="space-y-2 mb-2">
+                          <div className="space-y-2">
                             {booking.adminMessage && (
                               <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 flex items-start gap-2">
                                 <MessageSquare className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
@@ -531,12 +865,52 @@ export default function Bookings() {
                             </a>
                           </div>
                         )}
+
                         {booking.adminNotes && (
-                          <div className="mt-3 pt-3 border-t border-gray-100">
-                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-1">Admin Quote Notes</p>
+                          <div className="pt-2 border-t border-gray-100">
+                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-0.5">Admin Quote Notes</p>
                             <p className="text-xs text-gray-600 font-medium italic">"{booking.adminNotes}"</p>
                           </div>
                         )}
+
+                        {/* PDF Downloads */}
+                        <div className="pt-2 border-t border-gray-100 space-y-2">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => booking.type === 'function' ? downloadFunctionQuotation(booking) : downloadQuotation(booking)}
+                              className="flex-1 py-2 bg-purple-50 text-purple-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-purple-100 shadow-sm"
+                            >
+                              <Download className="w-3.5 h-3.5" /> Quotation PDF
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => booking.type === 'function' ? printFunctionQuotation(booking) : printQuotation(booking)}
+                              className="py-2 px-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-gray-200 shadow-sm"
+                            >
+                              <Printer className="w-3.5 h-3.5" /> Print Quote
+                            </button>
+                          </div>
+
+                          {booking.type === 'function' && booking.status === 'completed' && (
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => downloadFunctionInvoice(booking)}
+                                className="flex-1 py-2 bg-emerald-50 text-emerald-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-emerald-100 shadow-sm"
+                              >
+                                <Download className="w-3.5 h-3.5" /> Invoice PDF
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => printFunctionInvoice(booking)}
+                                className="py-2 px-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border border-gray-200 shadow-sm"
+                              >
+                                <Printer className="w-3.5 h-3.5" /> Print Invoice
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ) : null}
 

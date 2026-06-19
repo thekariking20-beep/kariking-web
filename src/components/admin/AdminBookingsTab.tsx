@@ -1,22 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc, orderBy } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, query, onSnapshot, doc, updateDoc, orderBy, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { BulkBooking, BulkBookingStatus } from '../../types';
+import { BulkBooking, BulkBookingStatus, BulkBookingItem, BulkBookingStatusHistory, Product } from '../../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+import { downloadQuotation, printQuotation } from '../../lib/quotationGenerator';
 import {
   Package, Clock, CheckCircle2, XCircle, CreditCard, ChevronDown,
   ChevronUp, IndianRupee, Calendar, Phone, User, AlertCircle, Check, X,
-  MapPin, Truck, Ban, MessageSquare, Send
+  MapPin, Truck, Ban, MessageSquare, Send, Eye, FileText, Printer, Download,
+  Plus, Trash2, Search, History, Mail, Building2, ShoppingCart, Percent
 } from 'lucide-react';
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 const STATUS_STYLES: Record<string, { label: string; cls: string }> = {
   requested:        { label: 'Requested',          cls: 'bg-blue-100 text-blue-700' },
   reviewed:         { label: 'Reviewed',           cls: 'bg-purple-100 text-purple-700' },
-  awaiting_payment: { label: 'Awaiting Payment',   cls: 'bg-amber-100 text-amber-700' },
-  confirmed:        { label: 'Confirmed',          cls: 'bg-green-100 text-green-700' },
-  delivered:        { label: 'Delivered',           cls: 'bg-emerald-100 text-emerald-700' },
+  awaiting_payment: { label: 'Quotation Sent',     cls: 'bg-amber-100 text-amber-700' },
+  confirmed:        { label: 'Approved',           cls: 'bg-green-100 text-green-700' },
+  delivered:        { label: 'Processing',         cls: 'bg-emerald-100 text-emerald-700' },
   completed:        { label: 'Completed',          cls: 'bg-gray-100 text-gray-600' },
   rejected:         { label: 'Rejected',           cls: 'bg-red-100 text-red-700' },
   cancelled:        { label: 'Cancelled',          cls: 'bg-red-100 text-red-700' },
@@ -32,7 +34,8 @@ export default function AdminBookingsTab() {
   useEffect(() => {
     const q = query(collection(db, 'bulkBookings'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snap => {
-      setBookings(snap.docs.map(d => ({ id: d.id, ...d.data() }) as BulkBooking));
+      const allBookings = snap.docs.map(d => ({ id: d.id, ...d.data() }) as BulkBooking);
+      setBookings(allBookings.filter(b => b.type === 'bulk' || !b.type));
       setLoading(false);
     });
     return () => unsub();
@@ -91,6 +94,21 @@ export default function AdminBookingsTab() {
   );
 }
 
+// ─── Helper: append status history entry ──────────────────────────────────────
+function buildStatusHistoryEntry(
+  status: string,
+  existingHistory: BulkBookingStatusHistory[] | undefined,
+  notes?: string
+): BulkBookingStatusHistory[] {
+  const entry: BulkBookingStatusHistory = {
+    status,
+    changedBy: 'admin',
+    timestamp: new Date().toISOString(),
+    ...(notes ? { notes } : {}),
+  };
+  return [...(existingHistory || []), entry];
+}
+
 // ─── Individual Booking Card ──────────────────────────────────────────────────
 function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; isExpanded: boolean; onToggle: () => void }) {
   const [editMode, setEditMode] = useState(false);
@@ -100,26 +118,31 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
   const [saving, setSaving] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showQuotationEditor, setShowQuotationEditor] = useState(false);
 
   const advance = Math.ceil(quotedPrice / 2);
   const status = STATUS_STYLES[booking.status] || STATUS_STYLES.requested;
 
-  const handleApprove = async () => {
+  // ─── Status transition handlers with history logging ───────────────────
+  const handleSendQuotation = async () => {
     if (quotedPrice <= 0) {
       alert('Please enter a valid price greater than ₹0');
       return;
     }
     setSaving(true);
     try {
+      const now = new Date().toISOString();
       await updateDoc(doc(db, 'bulkBookings', booking.id), {
-        quotedPrice: quotedPrice,
+        quotedPrice,
         advanceAmount: advance,
         balanceAmount: quotedPrice - advance,
         adminNotes,
         adminMessage: adminMessage.trim(),
         status: 'awaiting_payment',
-        reviewedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        reviewedAt: now,
+        updatedAt: now,
+        statusHistory: buildStatusHistoryEntry('awaiting_payment', booking.statusHistory, 'Quotation sent to customer'),
       });
       setEditMode(false);
     } catch (e) { console.error(e); alert('Failed to approve.'); }
@@ -128,38 +151,46 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
 
   const handleReject = async () => {
     if (!window.confirm('Reject this booking?')) return;
+    const now = new Date().toISOString();
     await updateDoc(doc(db, 'bulkBookings', booking.id), {
       status: 'rejected' as BulkBookingStatus,
       adminNotes,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      statusHistory: buildStatusHistoryEntry('rejected', booking.statusHistory, adminNotes || 'Booking rejected by admin'),
     });
   };
 
   const handleVerifyPayment = async () => {
     if (!window.confirm('Confirm payment received? This will confirm the order.')) return;
+    const now = new Date().toISOString();
     await updateDoc(doc(db, 'bulkBookings', booking.id), {
       status: 'confirmed' as BulkBookingStatus,
       paymentStatus: 'paid',
       advancePaid: true,
-      confirmedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      confirmedAt: now,
+      updatedAt: now,
+      statusHistory: buildStatusHistoryEntry('confirmed', booking.statusHistory, 'Payment verified and order approved'),
     });
   };
 
-  const handleMarkDelivered = async () => {
-    if (!window.confirm('Mark this order as delivered?')) return;
+  const handleMarkProcessing = async () => {
+    if (!window.confirm('Mark this order as Processing?')) return;
+    const now = new Date().toISOString();
     await updateDoc(doc(db, 'bulkBookings', booking.id), {
       status: 'delivered' as BulkBookingStatus,
-      deliveredAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      statusHistory: buildStatusHistoryEntry('delivered', booking.statusHistory, 'Order is being processed'),
     });
   };
 
   const handleComplete = async () => {
+    if (!window.confirm('Mark this order as Completed?')) return;
+    const now = new Date().toISOString();
     await updateDoc(doc(db, 'bulkBookings', booking.id), {
       status: 'completed' as BulkBookingStatus,
-      completedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      completedAt: now,
+      updatedAt: now,
+      statusHistory: buildStatusHistoryEntry('completed', booking.statusHistory, 'Order completed successfully'),
     });
   };
 
@@ -170,12 +201,14 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
     }
     setSaving(true);
     try {
+      const now = new Date().toISOString();
       await updateDoc(doc(db, 'bulkBookings', booking.id), {
         status: 'cancelled' as BulkBookingStatus,
         cancelReason: cancelReason.trim(),
         cancelledBy: 'admin',
-        cancelledAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        cancelledAt: now,
+        updatedAt: now,
+        statusHistory: buildStatusHistoryEntry('cancelled', booking.statusHistory, cancelReason.trim()),
       });
       setShowCancelModal(false);
       setCancelReason('');
@@ -245,18 +278,45 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                     </div>
                     <div className="text-right">
                       <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Quoted Total</p>
-                      <p className="text-lg font-black text-gray-900">₹{(booking.quotedPrice || 0).toLocaleString()}</p>
+                      <p className="text-lg font-black text-gray-900">₹{(booking.grandTotal || booking.quotedPrice || 0).toLocaleString()}</p>
                     </div>
                   </div>
                   
-                  {booking.advanceAmount > 0 && (
+                  {booking.advanceAmount! > 0 && (
                     <div className="flex justify-between items-center text-xs bg-gray-50 p-3 rounded-xl border border-gray-100">
                       <span className="font-bold text-gray-500">Advance (50%)</span>
                       <span className={cn("font-black px-2 py-1 rounded-lg", booking.advancePaid ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700")}>
-                        {booking.advancePaid ? 'Paid' : 'Pending'} ₹{booking.advanceAmount.toLocaleString()}
+                        {booking.advancePaid ? 'Paid' : 'Pending'} ₹{booking.advanceAmount!.toLocaleString()}
                       </span>
                     </div>
                   )}
+
+                  {/* Quotation Items Summary (if items exist) */}
+                  {booking.items && booking.items.length > 0 && (
+                    <div className="pt-3 border-t border-gray-100">
+                      <h4 className="text-[10px] uppercase tracking-widest font-black text-gray-400 mb-2 flex items-center gap-1">
+                        <ShoppingCart className="w-3 h-3" /> Quotation Items ({booking.items.length})
+                      </h4>
+                      <div className="space-y-1.5">
+                        {booking.items.map((item, idx) => (
+                          <div key={idx} className="flex justify-between items-center text-xs bg-white p-2 rounded-lg border border-gray-100">
+                            <span className="font-medium text-gray-800 truncate flex-1">{item.productName}</span>
+                            <span className="text-gray-500 mx-2">{item.quantity} {item.unitType}</span>
+                            <span className="font-bold text-gray-900">₹{(item.lineTotal ?? item.subtotal).toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Totals summary */}
+                      <div className="mt-2 bg-gray-100/50 rounded-lg p-2 space-y-1 text-xs">
+                        <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-bold">₹{(booking.subtotal || 0).toLocaleString()}</span></div>
+                        {(booking.deliveryCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Delivery</span><span className="font-bold">₹{booking.deliveryCharges!.toLocaleString()}</span></div>}
+                        {(booking.additionalCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Additional</span><span className="font-bold">₹{booking.additionalCharges!.toLocaleString()}</span></div>}
+                        {(booking.globalDiscount || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Discount</span><span className="font-bold text-green-600">-₹{booking.globalDiscount!.toLocaleString()}</span></div>}
+                        <div className="flex justify-between border-t border-gray-200 pt-1"><span className="font-black text-gray-700">Grand Total</span><span className="font-black text-[#8B0000]">₹{(booking.grandTotal || booking.quotedPrice || 0).toLocaleString()}</span></div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Location */}
                   {booking.location && (
                     <div className="pt-3 border-t border-gray-100">
@@ -274,21 +334,53 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                 </div>
               )}
 
+              {/* ─── Quick Action Bar ──────────────────────────────── */}
+              <div className="flex gap-2 flex-wrap">
+                {/* View Details Button */}
+                <button
+                  onClick={() => setShowDetailsModal(true)}
+                  className="flex-1 min-w-[120px] py-2.5 bg-indigo-50 text-indigo-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98] border border-indigo-100"
+                >
+                  <Eye className="w-3.5 h-3.5" /> View Details
+                </button>
+
+                {/* PDF Actions — available when quotation exists */}
+                {booking.quotedPrice != null && booking.status !== 'requested' && (
+                  <>
+                    <button
+                      onClick={() => downloadQuotation(booking)}
+                      className="py-2.5 px-3 bg-purple-50 text-purple-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98] border border-purple-100"
+                    >
+                      <Download className="w-3.5 h-3.5" /> PDF
+                    </button>
+                    <button
+                      onClick={() => printQuotation(booking)}
+                      className="py-2.5 px-3 bg-gray-50 text-gray-700 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98] border border-gray-200"
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Print
+                    </button>
+                  </>
+                )}
+              </div>
+
               {/* ─── Admin Actions ─────────────────────────────────── */}
               {(booking.status === 'requested' || booking.status === 'reviewed') && (
                 <div className="space-y-3">
-                  {!editMode ? (
+                  {!editMode && !showQuotationEditor ? (
                     <div className="flex gap-2">
-                      <button onClick={() => setEditMode(true)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
-                        <IndianRupee className="w-4 h-4" /> Set Price & Approve
+                      <button onClick={() => setShowQuotationEditor(true)} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
+                        <FileText className="w-4 h-4" /> Create Quotation
+                      </button>
+                      <button onClick={() => setEditMode(true)} className="py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
+                        <IndianRupee className="w-4 h-4" /> Quick Price
                       </button>
                       <button onClick={handleReject} className="py-3 px-4 bg-red-50 text-red-600 rounded-xl font-bold text-sm active:scale-[0.98]">
                         <X className="w-5 h-5" />
                       </button>
                     </div>
-                  ) : (
+                  ) : editMode ? (
                     <div className="bg-blue-50 rounded-2xl p-4 space-y-3 border border-blue-100">
-                      <h4 className="text-xs font-black text-blue-800 uppercase tracking-widest">Price Editor</h4>
+                      <h4 className="text-xs font-black text-blue-800 uppercase tracking-widest">Quick Price Editor</h4>
                       
                       <div>
                         <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">Final Quoted Price</label>
@@ -312,12 +404,24 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                       <textarea placeholder="Admin notes (internal — not visible to customer)" value={adminNotes} onChange={e => setAdminNotes(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-medium text-xs outline-none resize-none" />
 
                       <div className="flex gap-2">
-                        <button onClick={handleApprove} disabled={saving} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50">
-                          <Check className="w-4 h-4" /> {saving ? 'Saving...' : 'Approve & Send Price'}
+                        <button onClick={handleSendQuotation} disabled={saving} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50">
+                          <Check className="w-4 h-4" /> {saving ? 'Saving...' : 'Send Quotation'}
                         </button>
                         <button onClick={() => setEditMode(false)} className="py-3 px-4 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm">Cancel</button>
                       </div>
                     </div>
+                  ) : null}
+
+                  {/* Quotation Editor Inline */}
+                  {showQuotationEditor && (
+                    <QuotationEditor
+                      booking={booking}
+                      onClose={() => setShowQuotationEditor(false)}
+                      adminMessage={adminMessage}
+                      onAdminMessageChange={setAdminMessage}
+                      adminNotes={adminNotes}
+                      onAdminNotesChange={setAdminNotes}
+                    />
                   )}
                 </div>
               )}
@@ -325,7 +429,7 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
               {/* WhatsApp Contact Button — available for all active bookings */}
               {!isTerminal && (
                 <a
-                  href={`https://wa.me/${booking.userPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi ${booking.userName}, regarding your Kari King ${booking.type} booking #${booking.id.slice(-6)}:\n\nQuoted Price: ₹${(booking.quotedPrice || quotedPrice).toLocaleString()}\nAdvance (50%): ₹${(booking.advanceAmount || advance).toLocaleString()}\n\n${adminMessage || 'We will connect with you shortly to discuss the details.'}\n\nPay advance via UPI to confirm your order. Thank you!`)}`}
+                  href={`https://wa.me/${booking.userPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi ${booking.userName}, regarding your Kari King ${booking.type} booking #${booking.id.slice(-6)}:\n\nQuoted Price: ₹${(booking.grandTotal || booking.quotedPrice || quotedPrice).toLocaleString()}\nAdvance (50%): ₹${(booking.advanceAmount || advance).toLocaleString()}\n\n${adminMessage || 'We will connect with you shortly to discuss the details.'}\n\nPay advance via UPI to confirm your order. Thank you!`)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="w-full py-3 bg-green-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] shadow-md shadow-green-500/20"
@@ -343,11 +447,11 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
                 </div>
               )}
 
-              {/* Delivery + Complete actions */}
+              {/* Processing + Complete actions */}
               {booking.status === 'confirmed' && (
                 <div className="flex gap-2">
-                  <button onClick={handleMarkDelivered} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
-                    <Truck className="w-4 h-4" /> Mark Delivered
+                  <button onClick={handleMarkProcessing} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
+                    <Truck className="w-4 h-4" /> Mark Processing
                   </button>
                   <button onClick={handleComplete} className="flex-1 py-3 bg-gray-800 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98]">
                     <Check className="w-4 h-4" /> Complete
@@ -390,9 +494,35 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
               {/* Show approved price for non-editable statuses */}
               {booking.quotedPrice != null && booking.status !== 'requested' && booking.status !== 'reviewed' && (
                 <div className="bg-green-50 rounded-xl p-3 border border-green-100 space-y-1">
-                  <div className="flex justify-between text-xs"><span className="text-gray-500">Quoted Price</span><span className="font-black">₹{booking.quotedPrice.toLocaleString()}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-gray-500">Quoted Price</span><span className="font-black">₹{(booking.grandTotal || booking.quotedPrice).toLocaleString()}</span></div>
                   <div className="flex justify-between text-xs text-[#8B0000]"><span className="font-bold">Advance (50%)</span><span className="font-black">₹{(booking.advanceAmount || 0).toLocaleString()}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-gray-500">Advance Paid</span><span className="font-bold capitalize">{booking.advancePaid ? 'Yes' : 'No'}</span></div>
+                </div>
+              )}
+
+              {/* Status History Timeline */}
+              {booking.statusHistory && booking.statusHistory.length > 0 && (
+                <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2 flex items-center gap-1">
+                    <History className="w-3 h-3" /> Status History
+                  </h4>
+                  <div className="space-y-2">
+                    {booking.statusHistory.map((entry, idx) => {
+                      const stStyle = STATUS_STYLES[entry.status] || { label: entry.status, cls: 'bg-gray-100 text-gray-600' };
+                      return (
+                        <div key={idx} className="flex items-start gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-[#8B0000] mt-1.5 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded", stStyle.cls)}>{stStyle.label}</span>
+                              <span className="text-[9px] text-gray-400">{new Date(entry.timestamp).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            {entry.notes && <p className="text-[10px] text-gray-500 mt-0.5">{entry.notes}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -400,6 +530,13 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
         )}
       </AnimatePresence>
     </motion.div>
+
+    {/* View Details Modal */}
+    <AnimatePresence>
+      {showDetailsModal && (
+        <BookingDetailsModal booking={booking} onClose={() => setShowDetailsModal(false)} />
+      )}
+    </AnimatePresence>
 
     {/* Cancel Modal */}
     <AnimatePresence>
@@ -461,5 +598,620 @@ function BookingCard({ booking, isExpanded, onToggle }: { booking: BulkBooking; 
       )}
     </AnimatePresence>
     </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// View Details Modal — Customer info, target specs, quotation, timeline
+// ═══════════════════════════════════════════════════════════════════════════════
+function BookingDetailsModal({ booking, onClose }: { booking: BulkBooking; onClose: () => void }) {
+  const [customerEmail, setCustomerEmail] = useState(booking.userEmail || '');
+  const [customerCompany, setCustomerCompany] = useState(booking.companyName || '');
+  const [loadingUser, setLoadingUser] = useState(!booking.userEmail);
+
+  // Fetch user details from Firestore
+  useEffect(() => {
+    if (booking.userEmail && booking.companyName) return;
+    const fetchUser = async () => {
+      try {
+        const snap = await getDocs(query(collection(db, 'users')));
+        const u = snap.docs.find(d => d.id === booking.userId)?.data();
+        if (u) {
+          if (!booking.userEmail && u.email) setCustomerEmail(u.email as string);
+          if (!booking.companyName && u.companyName) setCustomerCompany(u.companyName as string);
+        }
+      } catch (e) { console.error('Failed to fetch user details', e); }
+      finally { setLoadingUser(false); }
+    };
+    fetchUser();
+  }, [booking.userId, booking.userEmail, booking.companyName]);
+
+  const status = STATUS_STYLES[booking.status] || STATUS_STYLES.requested;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+        className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] shadow-2xl overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="bg-gradient-to-r from-[#8B0000] to-[#A50000] p-5 text-white relative">
+          <button onClick={onClose} className="absolute top-4 right-4 p-1 rounded-full bg-white/20 hover:bg-white/30">
+            <X className="w-4 h-4" />
+          </button>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black">Booking Details</h3>
+              <p className="text-white/70 text-xs">#{booking.id.slice(-6)} · {booking.type.toUpperCase()}</p>
+            </div>
+          </div>
+          <span className={cn("absolute bottom-4 right-4 text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full", status.cls)}>
+            {status.label}
+          </span>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Customer Information */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+              <User className="w-3 h-3" /> Customer Information
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Name</p>
+                <p className="text-sm font-bold text-gray-900">{booking.userName}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Phone</p>
+                <p className="text-sm font-bold text-gray-900 flex items-center gap-1"><Phone className="w-3 h-3 text-gray-400" />{booking.userPhone}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Email</p>
+                <p className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                  <Mail className="w-3 h-3 text-gray-400" />
+                  {loadingUser ? <span className="text-gray-400 italic text-xs">Loading...</span> : (customerEmail || <span className="text-gray-400 italic text-xs">Not provided</span>)}
+                </p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Company</p>
+                <p className="text-sm font-medium text-gray-700 flex items-center gap-1">
+                  <Building2 className="w-3 h-3 text-gray-400" />
+                  {loadingUser ? <span className="text-gray-400 italic text-xs">Loading...</span> : (customerCompany || <span className="text-gray-400 italic text-xs">Not provided</span>)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Target Specifications */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+              <Package className="w-3 h-3" /> Target Specifications
+            </h4>
+            <div>
+              <p className="text-[9px] text-gray-400 font-bold uppercase">Meat Specialization</p>
+              <p className="text-sm font-medium text-gray-800 mt-0.5">{booking.meatDetails || 'Legacy Order'}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-gray-100">
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Quantity</p>
+                <p className="text-sm font-black text-[#8B0000]">{booking.quantityRequirement || '-'}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">People</p>
+                <p className="text-sm font-bold text-gray-900">{booking.peopleCount}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Delivery Time</p>
+                <p className="text-sm font-bold text-gray-900">{booking.deliveryTime || '-'}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Required Date</p>
+                <p className="text-sm font-bold text-gray-900">{new Date(booking.requiredDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-gray-400 font-bold uppercase">Location</p>
+                <p className="text-xs font-medium text-gray-700 leading-relaxed">{booking.location || '-'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Quotation Items */}
+          {booking.items && booking.items.length > 0 && (
+            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 space-y-3">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+                <ShoppingCart className="w-3 h-3" /> Quotation Items
+              </h4>
+              <div className="space-y-2">
+                {booking.items.map((item, idx) => (
+                  <div key={idx} className="bg-white rounded-lg p-3 border border-gray-100">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-gray-900">{item.productName}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">
+                          {item.quantity} {item.unitType} × ₹{item.unitPrice.toLocaleString()}
+                          {(item.discount || 0) > 0 && <span className="text-green-600 ml-1">(-₹{item.discount!.toLocaleString()} disc)</span>}
+                        </p>
+                      </div>
+                      <p className="text-sm font-black text-gray-900">₹{(item.lineTotal ?? item.subtotal).toLocaleString()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Totals */}
+              <div className="bg-white rounded-lg p-3 border border-gray-200 space-y-1.5 text-xs">
+                <div className="flex justify-between"><span className="text-gray-500">Subtotal</span><span className="font-bold">₹{(booking.subtotal || 0).toLocaleString()}</span></div>
+                {(booking.deliveryCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Delivery Charges</span><span className="font-bold">₹{booking.deliveryCharges!.toLocaleString()}</span></div>}
+                {(booking.additionalCharges || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Additional Charges</span><span className="font-bold">₹{booking.additionalCharges!.toLocaleString()}</span></div>}
+                {(booking.globalDiscount || 0) > 0 && <div className="flex justify-between"><span className="text-gray-500">Discount</span><span className="font-bold text-green-600">-₹{booking.globalDiscount!.toLocaleString()}</span></div>}
+                <div className="flex justify-between border-t border-gray-200 pt-2">
+                  <span className="font-black text-gray-700">Grand Total</span>
+                  <span className="font-black text-[#8B0000] text-base">₹{(booking.grandTotal || booking.quotedPrice || 0).toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Pricing Summary (non-itemized) */}
+          {booking.quotedPrice != null && booking.status !== 'requested' && (!booking.items || booking.items.length === 0) && (
+            <div className="bg-green-50 rounded-xl p-4 border border-green-100 space-y-2">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 flex items-center gap-1">
+                <IndianRupee className="w-3 h-3" /> Pricing
+              </h4>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Quoted Price</span><span className="font-black">₹{booking.quotedPrice.toLocaleString()}</span></div>
+              <div className="flex justify-between text-sm text-[#8B0000]"><span className="font-bold">Advance (50%)</span><span className="font-black">₹{(booking.advanceAmount || 0).toLocaleString()}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-600">Advance Paid</span><span className="font-bold">{booking.advancePaid ? '✅ Yes' : '❌ No'}</span></div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {booking.notes && (
+            <div className="bg-blue-50 rounded-xl p-3 text-xs text-blue-800 border border-blue-100">
+              <p className="text-[9px] text-blue-500 font-black uppercase tracking-widest mb-1">Customer Notes</p>
+              <p className="font-medium leading-relaxed">{booking.notes}</p>
+            </div>
+          )}
+          {booking.adminNotes && (
+            <div className="bg-amber-50 rounded-xl p-3 text-xs text-amber-800 border border-amber-100">
+              <p className="text-[9px] text-amber-500 font-black uppercase tracking-widest mb-1">Admin Notes (Internal)</p>
+              <p className="font-medium leading-relaxed">{booking.adminNotes}</p>
+            </div>
+          )}
+
+          {/* Status History Timeline */}
+          {booking.statusHistory && booking.statusHistory.length > 0 && (
+            <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 flex items-center gap-1">
+                <History className="w-3 h-3" /> Status Timeline
+              </h4>
+              <div className="relative pl-4 border-l-2 border-[#8B0000]/20 space-y-4">
+                {booking.statusHistory.map((entry, idx) => {
+                  const stStyle = STATUS_STYLES[entry.status] || { label: entry.status, cls: 'bg-gray-100 text-gray-600' };
+                  return (
+                    <div key={idx} className="relative">
+                      <div className="absolute -left-[21px] top-0.5 w-3 h-3 rounded-full bg-[#8B0000] border-2 border-white" />
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded", stStyle.cls)}>{stStyle.label}</span>
+                          <span className="text-[9px] text-gray-400 font-medium">
+                            {new Date(entry.timestamp).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span className="text-[9px] text-gray-400">by {entry.changedBy}</span>
+                        </div>
+                        {entry.notes && <p className="text-[10px] text-gray-600 mt-1 font-medium">{entry.notes}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Timestamps */}
+          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+            <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-2">Timestamps</h4>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-gray-400">Created:</span> <span className="font-bold">{new Date(booking.createdAt).toLocaleString('en-IN')}</span></div>
+              <div><span className="text-gray-400">Updated:</span> <span className="font-bold">{new Date(booking.updatedAt).toLocaleString('en-IN')}</span></div>
+              {booking.reviewedAt && <div><span className="text-gray-400">Reviewed:</span> <span className="font-bold">{new Date(booking.reviewedAt).toLocaleString('en-IN')}</span></div>}
+              {booking.confirmedAt && <div><span className="text-gray-400">Confirmed:</span> <span className="font-bold">{new Date(booking.confirmedAt).toLocaleString('en-IN')}</span></div>}
+              {booking.completedAt && <div><span className="text-gray-400">Completed:</span> <span className="font-bold">{new Date(booking.completedAt).toLocaleString('en-IN')}</span></div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 border-t border-gray-100 flex gap-2 bg-gray-50/50">
+          {booking.quotedPrice != null && booking.status !== 'requested' && (
+            <>
+              <button
+                onClick={() => downloadQuotation(booking)}
+                className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98]"
+              >
+                <Download className="w-3.5 h-3.5" /> Download PDF
+              </button>
+              <button
+                onClick={() => printQuotation(booking)}
+                className="flex-1 py-2.5 bg-gray-700 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 active:scale-[0.98]"
+              >
+                <Printer className="w-3.5 h-3.5" /> Print
+              </button>
+            </>
+          )}
+          <button onClick={onClose} className="py-2.5 px-5 bg-gray-200 text-gray-700 rounded-xl font-bold text-xs active:scale-[0.98]">
+            Close
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Quotation Editor — Line-item builder with product selection from Firestore
+// ═══════════════════════════════════════════════════════════════════════════════
+interface QuotationEditorProps {
+  booking: BulkBooking;
+  onClose: () => void;
+  adminMessage: string;
+  onAdminMessageChange: (v: string) => void;
+  adminNotes: string;
+  onAdminNotesChange: (v: string) => void;
+}
+
+interface QuotationLineItem {
+  productId: string;
+  productName: string;
+  productImage: string;
+  unitPrice: number;
+  quantity: number;
+  unitType: 'kg' | 'gram' | 'piece';
+  discount: number;
+}
+
+function QuotationEditor({ booking, onClose, adminMessage, onAdminMessageChange, adminNotes, onAdminNotesChange }: QuotationEditorProps) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [lineItems, setLineItems] = useState<QuotationLineItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [deliveryCharges, setDeliveryCharges] = useState(0);
+  const [additionalCharges, setAdditionalCharges] = useState(0);
+  const [globalDiscount, setGlobalDiscount] = useState(0);
+  const [saving, setSaving] = useState(false);
+
+  // Load products from Firestore
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'products'));
+        setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() }) as Product));
+      } catch (e) { console.error('Failed to load products', e); }
+      finally { setLoadingProducts(false); }
+    };
+    fetchProducts();
+  }, []);
+
+  // Pre-populate from existing booking items
+  useEffect(() => {
+    if (booking.items && booking.items.length > 0) {
+      setLineItems(booking.items.map(item => ({
+        productId: item.productId,
+        productName: item.productName,
+        productImage: item.productImage,
+        unitPrice: item.unitPrice,
+        quantity: item.quantity,
+        unitType: item.unitType,
+        discount: item.discount || 0,
+      })));
+      if (booking.deliveryCharges) setDeliveryCharges(booking.deliveryCharges);
+      if (booking.additionalCharges) setAdditionalCharges(booking.additionalCharges);
+      if (booking.globalDiscount) setGlobalDiscount(booking.globalDiscount);
+    }
+  }, [booking.items, booking.deliveryCharges, booking.additionalCharges, booking.globalDiscount]);
+
+  const filteredProducts = useMemo(() => {
+    if (!searchQuery.trim()) return products;
+    const q = searchQuery.toLowerCase();
+    return products.filter(p => p.name.toLowerCase().includes(q) || p.mainCategory?.toLowerCase().includes(q));
+  }, [products, searchQuery]);
+
+  const addProduct = (product: Product) => {
+    // Check if already added
+    if (lineItems.some(li => li.productId === product.id)) {
+      alert('This product is already in the quotation');
+      return;
+    }
+    setLineItems(prev => [...prev, {
+      productId: product.id,
+      productName: product.name,
+      productImage: product.image || '',
+      unitPrice: product.sellingPrice,
+      quantity: 1,
+      unitType: (product.unitType as 'kg' | 'gram' | 'piece') || 'kg',
+      discount: 0,
+    }]);
+    setShowProductPicker(false);
+    setSearchQuery('');
+  };
+
+  const removeItem = (idx: number) => {
+    setLineItems(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const updateItem = (idx: number, field: keyof QuotationLineItem, value: any) => {
+    setLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item));
+  };
+
+  // Calculations
+  const subtotal = lineItems.reduce((sum, item) => {
+    const lineTotal = (item.unitPrice * item.quantity) - item.discount;
+    return sum + Math.max(lineTotal, 0);
+  }, 0);
+
+  const grandTotal = subtotal + deliveryCharges + additionalCharges - globalDiscount;
+
+  const handleSubmitQuotation = async () => {
+    if (lineItems.length === 0) {
+      alert('Please add at least one product to the quotation');
+      return;
+    }
+    if (grandTotal <= 0) {
+      alert('Grand total must be greater than ₹0');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const builtItems: BulkBookingItem[] = lineItems.map(li => ({
+        productId: li.productId,
+        productName: li.productName,
+        productImage: li.productImage,
+        unitPrice: li.unitPrice,
+        quantity: li.quantity,
+        unitType: li.unitType,
+        subtotal: li.unitPrice * li.quantity,
+        discount: li.discount,
+        lineTotal: (li.unitPrice * li.quantity) - li.discount,
+      }));
+
+      const advanceAmount = Math.ceil(grandTotal / 2);
+
+      await updateDoc(doc(db, 'bulkBookings', booking.id), {
+        items: builtItems,
+        subtotal,
+        deliveryCharges,
+        additionalCharges,
+        globalDiscount,
+        grandTotal,
+        quotedPrice: grandTotal,
+        advanceAmount,
+        balanceAmount: grandTotal - advanceAmount,
+        adminNotes,
+        adminMessage: adminMessage.trim(),
+        status: 'awaiting_payment',
+        reviewedAt: now,
+        updatedAt: now,
+        statusHistory: buildStatusHistoryEntry('awaiting_payment', booking.statusHistory, `Detailed quotation with ${builtItems.length} item(s) sent to customer`),
+      });
+      onClose();
+    } catch (e) {
+      console.error(e);
+      alert('Failed to send quotation.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 space-y-4 border border-blue-200 shadow-lg">
+      <div className="flex items-center justify-between">
+        <h4 className="text-sm font-black text-indigo-900 uppercase tracking-widest flex items-center gap-2">
+          <FileText className="w-4 h-4" /> Quotation Builder
+        </h4>
+        <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/50">
+          <X className="w-4 h-4 text-gray-500" />
+        </button>
+      </div>
+
+      {/* Line Items */}
+      <div className="space-y-2">
+        {lineItems.map((item, idx) => (
+          <div key={idx} className="bg-white rounded-xl p-3 border border-gray-100 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold text-gray-900 truncate flex-1">{item.productName}</p>
+              <button onClick={() => removeItem(idx)} className="p-1 text-red-400 hover:text-red-600">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div>
+                <label className="text-[9px] font-bold text-gray-400 uppercase">Qty</label>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={item.quantity}
+                  onChange={e => updateItem(idx, 'quantity', Math.max(0, Number(e.target.value)))}
+                  className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-gray-400 uppercase">Unit</label>
+                <select
+                  value={item.unitType}
+                  onChange={e => updateItem(idx, 'unitType', e.target.value)}
+                  className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400 bg-white"
+                >
+                  <option value="kg">kg</option>
+                  <option value="gram">gram</option>
+                  <option value="piece">piece</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-gray-400 uppercase">Rate (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={item.unitPrice}
+                  onChange={e => updateItem(idx, 'unitPrice', Math.max(0, Number(e.target.value)))}
+                  className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-[9px] font-bold text-gray-400 uppercase flex items-center gap-0.5"><Percent className="w-2.5 h-2.5" /> Disc (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={item.discount}
+                  onChange={e => updateItem(idx, 'discount', Math.max(0, Number(e.target.value)))}
+                  className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end mt-1">
+              <span className="text-[10px] font-black text-gray-600">
+                Line Total: ₹{Math.max((item.unitPrice * item.quantity) - item.discount, 0).toLocaleString()}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Add Product Button / Picker */}
+      {!showProductPicker ? (
+        <button
+          onClick={() => setShowProductPicker(true)}
+          className="w-full py-3 border-2 border-dashed border-blue-300 rounded-xl text-blue-600 font-bold text-xs flex items-center justify-center gap-2 hover:bg-blue-50 transition-colors"
+        >
+          <Plus className="w-4 h-4" /> Add Product
+        </button>
+      ) : (
+        <div className="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-md">
+          <div className="p-2 border-b border-gray-100">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search products..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-xs outline-none focus:border-blue-400"
+                autoFocus
+              />
+            </div>
+          </div>
+          <div className="max-h-48 overflow-y-auto p-1">
+            {loadingProducts ? (
+              <p className="text-xs text-gray-400 p-3 text-center">Loading products...</p>
+            ) : filteredProducts.length === 0 ? (
+              <p className="text-xs text-gray-400 p-3 text-center">No products found</p>
+            ) : (
+              filteredProducts.slice(0, 20).map(product => (
+                <button
+                  key={product.id}
+                  onClick={() => addProduct(product)}
+                  className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-blue-50 text-left transition-colors"
+                >
+                  {product.image && <img src={product.image} alt="" className="w-8 h-8 rounded-lg object-cover shrink-0" />}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-gray-900 truncate">{product.name}</p>
+                    <p className="text-[10px] text-gray-500">{product.mainCategory} · ₹{product.sellingPrice}/{product.unitType || 'kg'}</p>
+                  </div>
+                  <Plus className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                </button>
+              ))
+            )}
+          </div>
+          <div className="p-2 border-t border-gray-100">
+            <button onClick={() => { setShowProductPicker(false); setSearchQuery(''); }} className="w-full py-1.5 text-xs font-bold text-gray-500 hover:text-gray-700">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Additional Charges */}
+      {lineItems.length > 0 && (
+        <div className="bg-white rounded-xl p-3 border border-gray-100 space-y-2">
+          <h5 className="text-[9px] font-black text-gray-500 uppercase tracking-widest">Additional Charges & Discounts</h5>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[9px] font-bold text-gray-400 uppercase">Delivery (₹)</label>
+              <input
+                type="number" min="0" value={deliveryCharges}
+                onChange={e => setDeliveryCharges(Math.max(0, Number(e.target.value)))}
+                className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] font-bold text-gray-400 uppercase">Additional (₹)</label>
+              <input
+                type="number" min="0" value={additionalCharges}
+                onChange={e => setAdditionalCharges(Math.max(0, Number(e.target.value)))}
+                className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+              />
+            </div>
+            <div>
+              <label className="text-[9px] font-bold text-gray-400 uppercase">Discount (₹)</label>
+              <input
+                type="number" min="0" value={globalDiscount}
+                onChange={e => setGlobalDiscount(Math.max(0, Number(e.target.value)))}
+                className="w-full mt-0.5 px-2 py-1.5 border border-gray-200 rounded-lg text-xs font-bold outline-none focus:border-blue-400"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Totals */}
+      {lineItems.length > 0 && (
+        <div className="bg-white rounded-xl p-3 border border-gray-200 space-y-1.5">
+          <div className="flex justify-between text-xs"><span className="text-gray-500">Subtotal</span><span className="font-bold">₹{subtotal.toLocaleString()}</span></div>
+          {deliveryCharges > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">+ Delivery</span><span className="font-bold">₹{deliveryCharges.toLocaleString()}</span></div>}
+          {additionalCharges > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">+ Additional</span><span className="font-bold">₹{additionalCharges.toLocaleString()}</span></div>}
+          {globalDiscount > 0 && <div className="flex justify-between text-xs"><span className="text-gray-500">- Discount</span><span className="font-bold text-green-600">-₹{globalDiscount.toLocaleString()}</span></div>}
+          <div className="flex justify-between border-t border-gray-200 pt-1.5">
+            <span className="text-sm font-black text-gray-700">Grand Total</span>
+            <span className="text-sm font-black text-[#8B0000]">₹{Math.max(grandTotal, 0).toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-500">Advance (50%)</span>
+            <span className="font-bold text-blue-700">₹{Math.ceil(Math.max(grandTotal, 0) / 2).toLocaleString()}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Message & Notes */}
+      <div>
+        <label className="text-[10px] font-bold text-green-700 uppercase mb-1 block flex items-center gap-1"><Send className="w-3 h-3" /> Message to Customer</label>
+        <textarea placeholder="e.g. We will connect with you shortly..." value={adminMessage} onChange={e => onAdminMessageChange(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-green-200 rounded-xl font-medium text-xs outline-none resize-none focus:border-green-500" />
+      </div>
+
+      <textarea placeholder="Admin notes (internal)" value={adminNotes} onChange={e => onAdminNotesChange(e.target.value)} rows={2} className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-medium text-xs outline-none resize-none" />
+
+      {/* Submit */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleSubmitQuotation}
+          disabled={saving || lineItems.length === 0}
+          className="flex-1 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50 shadow-lg shadow-green-600/20"
+        >
+          <Send className="w-4 h-4" /> {saving ? 'Sending...' : 'Send Quotation to Customer'}
+        </button>
+        <button onClick={onClose} className="py-3 px-4 bg-gray-200 text-gray-600 rounded-xl font-bold text-sm">Cancel</button>
+      </div>
+    </div>
   );
 }

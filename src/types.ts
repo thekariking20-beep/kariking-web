@@ -152,6 +152,15 @@ export interface BulkBookingItem {
   quantity: number;        // in kg/pieces
   unitType: 'kg' | 'gram' | 'piece';
   subtotal: number;        // unitPrice × quantity
+  discount?: number;       // discount amount per line item
+  lineTotal?: number;      // total after discount (unitPrice * quantity) - discount
+}
+
+export interface BulkBookingStatusHistory {
+  status: string;
+  changedBy: string;
+  timestamp: string;
+  notes?: string;
 }
 
 export interface BulkBooking {
@@ -159,6 +168,8 @@ export interface BulkBooking {
   userId: string;
   userName: string;
   userPhone: string;
+  userEmail?: string;     // Customer email
+  companyName?: string;   // Optional company name
 
   // Base details
   type: 'bulk' | 'function';
@@ -172,10 +183,17 @@ export interface BulkBooking {
   items?: BulkBookingItem[];
 
   // Pricing & Payments
-  quotedPrice?: number;         // Set by admin dynamically
+  quotedPrice?: number;         // Set by admin dynamically (represents grandTotal)
   advanceAmount?: number;       // 50% of quotedPrice
   balanceAmount?: number;       // 50% remaining
   advancePaid: boolean;         // Tracking UPI payment completion
+
+  // Quotation specific totals
+  subtotal?: number;
+  deliveryCharges?: number;
+  additionalCharges?: number;
+  globalDiscount?: number;      // additional discount
+  grandTotal?: number;          // grand total
 
   // Dates, Times & Locations
   requiredDate: string;
@@ -186,10 +204,11 @@ export interface BulkBooking {
   adminMessage?: string;       // Customer-facing message from admin (e.g. "We'll contact you shortly")
   utrNumber?: string;          // UTR from advance payment
 
-  // Status
+  // Status & History
   status: BulkBookingStatus;
   paymentStatus: BulkPaymentStatus;
   paymentMethod?: 'qr' | 'cod';
+  statusHistory?: BulkBookingStatusHistory[];
 
   // Timestamps
   createdAt: string;
@@ -203,6 +222,21 @@ export interface BulkBooking {
   cancelReason?: string;
   cancelledBy?: 'admin' | 'user';
   cancelledAt?: string;
+
+  // Function / Event booking optional details
+  functionType?: 'Marriage' | 'Reception' | 'Birthday' | 'Temple Function' | 'Corporate Event' | 'House Function' | 'Other';
+  eventAddress?: string;
+  eventArea?: string;
+  eventCity?: string;
+  eventPincode?: string;
+  eventDate?: string;
+  eventTime?: string;
+  deliveryDate?: string;
+  adultCount?: number;
+  childrenCount?: number;
+  vegCount?: number;
+  nonVegCount?: number;
+  specialInstructions?: string;
 }
 
 export interface FunctionDetails {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, updateDoc, deleteDoc, doc, query, orderBy, where, onSnapshot, limit, getDocs, startAfter, DocumentSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Product, Category, User, Order, Referral } from '../types';
-import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap, Home, Banknote } from 'lucide-react';
+import { Plus, Edit2, Trash2, Check, X, Package, Image as ImageIcon, Tag, IndianRupee, FileText, ToggleLeft, ToggleRight, LayoutDashboard, ShoppingCart, Users, Shield, Gift, Truck, MapPin, Phone, Globe, PartyPopper, Menu, Crown, LogOut, ChevronUp, Settings, Camera, Mail, Save, User as UserIcon, Layers, Zap, Home, Banknote, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
@@ -14,6 +14,7 @@ import DriverVerification from '../components/admin/DriverVerification';
 import AdminSettings from '../components/admin/AdminSettings';
 import AdminOrdersTab from '../components/admin/AdminOrdersTab';
 import AdminBookingsTab from '../components/admin/AdminBookingsTab';
+import AdminFunctionBookingsTab from '../components/admin/AdminFunctionBookingsTab';
 import CategoriesManager from '../components/admin/CategoriesManager';
 import CouponManager from '../components/admin/CouponManager';
 import RewardCampaignManager from '../components/admin/RewardCampaignManager';
@@ -23,7 +24,7 @@ import { useNavigate } from 'react-router-dom';
 
 export default function Admin() {
   const { user, isAdmin, isManager, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons' | 'campaigns' | 'withdrawals'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'bookings' | 'functions' | 'users' | 'referrals' | 'homepage' | 'provisioning' | 'verification' | 'settings' | 'categories' | 'coupons' | 'campaigns' | 'withdrawals'>('dashboard');
   const { categories: dynamicCategories, getSubCategories: getDynamicSubCategories } = useCategories();
   
   const [revenueData, setRevenueData] = useState<{date: string, amount: number}[]>([]);
@@ -366,6 +367,7 @@ export default function Admin() {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'orders', label: 'Orders', icon: ShoppingCart },
     { id: 'bookings', label: 'Bookings', icon: PartyPopper },
+    { id: 'functions', label: 'Events', icon: Calendar },
     { id: 'products', label: 'Products', icon: Package },
     { id: 'categories', label: 'Categories', icon: Layers },
     { id: 'homepage', label: 'Homepage', icon: Globe },
@@ -554,6 +556,11 @@ export default function Admin() {
               {/* BULK BOOKINGS TAB */}
               {activeTab === 'bookings' && (
                 <AdminBookingsTab />
+              )}
+
+              {/* FUNCTION BOOKINGS TAB */}
+              {activeTab === 'functions' && (
+                <AdminFunctionBookingsTab />
               )}
 
               {/* PRODUCTS TAB */}

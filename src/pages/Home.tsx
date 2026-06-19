@@ -1,15 +1,16 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, onSnapshot, where, orderBy } from 'firebase/firestore';
+import { collection, query, onSnapshot, where, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Product, HomepageContent, Coupon } from '../types';
+import { Product, HomepageContent, Coupon, Order } from '../types';
 import ProductCard from '../components/ProductCard';
 import ProductGrid from '../components/ProductGrid';
 import BannerSlider from '../components/home/BannerSlider';
 import OffersRow from '../components/home/OffersRow';
 import CountdownStrip from '../components/home/CountdownStrip';
 import { motion, AnimatePresence } from 'motion/react';
-import { Star, Clock, ShieldCheck, ChevronRight, Flame, ArrowRight, ShoppingCart } from 'lucide-react';
+import { Star, Clock, ShieldCheck, ChevronRight, Flame, ArrowRight, ShoppingCart, Package } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import { cn } from '../lib/utils';
 import { useCategories } from '../context/CategoriesContext';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
@@ -93,6 +94,48 @@ export default function Home() {
   const [loading, setLoading] = useState(() => !sessionStorage.getItem('kk_products_cache'));
   const [cmsLoading, setCmsLoading] = useState(true);
   const [favorites, setFavorites] = useState<Product[]>([]);
+  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+
+  // ─── Real-time active order listener ─────────────────────────────────────────
+  useEffect(() => {
+    if (!user) {
+      setActiveOrder(null);
+      return;
+    }
+
+    const ACTIVE_STATUSES = [
+      'Order Placed',
+      'Order Received',
+      'Packed',
+      'Dispatched',
+      'Pending',
+      'Confirmed',
+      'Preparing',
+      'Assigned',
+      'Out For Delivery',
+      'Processing'
+    ];
+
+    const q = query(
+      collection(db, 'orders'),
+      where('userId', '==', user.uid),
+      where('status', 'in', ACTIVE_STATUSES),
+      orderBy('createdAt', 'desc'),
+      limit(1)
+    );
+
+    const unsub = onSnapshot(q, snap => {
+      if (snap.empty) {
+        setActiveOrder(null);
+      } else {
+        setActiveOrder({ id: snap.docs[0].id, ...snap.docs[0].data() } as Order);
+      }
+    }, err => {
+      console.error('Active order listener error:', err);
+    });
+
+    return () => unsub();
+  }, [user]);
 
   // ─── Real-time products listener ───────────────────────────────────────────
   useEffect(() => {
@@ -412,6 +455,57 @@ export default function Home() {
         </section>
       )}
 
+      {/* ─── ACTIVE ORDER ON HOMEPAGE ─────────────────────────────────────────── */}
+      {user && activeOrder && (
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-3xl p-5 border border-gray-100 shadow-[0_4px_20px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4"
+        >
+          <div className="flex items-start gap-4">
+            <div className="bg-red-50 p-3 rounded-2xl text-[#8B0000] shrink-0">
+              <Package className="w-6 h-6 animate-pulse" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Current Order</span>
+                <span className="text-xs font-black text-gray-900">#{activeOrder.id.slice(-6).toUpperCase()}</span>
+              </div>
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-x-4 gap-y-1 text-xs">
+                <div>
+                  <span className="text-gray-400 font-bold uppercase text-[9px] tracking-wide block sm:inline mr-1">Status:</span>
+                  <span className="font-extrabold text-[#8B0000]">{activeOrder.status}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400 font-bold uppercase text-[9px] tracking-wide block sm:inline mr-1">Amount:</span>
+                  <span className="font-black text-gray-900">₹{(activeOrder.finalAmount ?? activeOrder.totalAmount).toLocaleString()}</span>
+                </div>
+                <div>
+                  <span className="text-gray-400 font-bold uppercase text-[9px] tracking-wide block sm:inline mr-1">Payment:</span>
+                  <span className={cn(
+                    "font-bold",
+                    (activeOrder.paymentStatus === 'confirmed' || activeOrder.paymentStatus === 'paid' || activeOrder.paymentStatus === 'collected')
+                      ? "text-green-600"
+                      : "text-amber-600"
+                  )}>
+                    {(activeOrder.paymentStatus === 'confirmed' || activeOrder.paymentStatus === 'paid' || activeOrder.paymentStatus === 'collected') ? 'Paid' : 'Pending'}
+                  </span>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 font-medium">
+                Updated {formatRelativeTime(activeOrder.updatedAt || activeOrder.createdAt)}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/orders', { state: { expandOrderId: activeOrder.id } })}
+            className="w-full md:w-auto bg-[#8B0000] text-white font-black text-xs uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg shadow-red-900/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 hover:bg-red-800"
+          >
+            View Order <ChevronRight className="w-4 h-4" />
+          </button>
+        </motion.div>
+      )}
+
       {/* ─── OFFERS & COUPONS ───────────────────────────────────────────────── */}
       {cmsLoading ? (
         <div className="flex gap-4 overflow-hidden">
@@ -534,4 +628,21 @@ export default function Home() {
       )}
     </div>
   );
+}
+
+// ─── Helper Functions ────────────────────────────────────────────────────────
+function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return 'just now';
+  try {
+    const diffMs = Date.now() - new Date(dateStr).getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'just now';
+    if (diffMins < 60) return `${diffMins} ${diffMins === 1 ? 'min' : 'mins'} ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+  } catch {
+    return 'just now';
+  }
 }

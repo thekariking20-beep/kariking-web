@@ -424,9 +424,10 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
         })}
       </select>
       <select 
-        className={`w-full p-2 text-xs font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-${accentColor}-500/20`}
+        className={`w-full p-2 text-xs font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-${accentColor}-500/20 disabled:opacity-60 disabled:cursor-not-allowed`}
         value={order.status}
         onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
+        disabled={order.status === 'Delivered' || order.status === 'Cancelled'}
       >
         {/* Forward-only status transitions */}
         {(() => {
@@ -464,6 +465,17 @@ function OrderCard({ order, deliveryPartners, assignDeliveryPartner, updateOrder
   );
 }
 
+const STATUS_STYLES: Record<string, { label: string; bg: string; text: string }> = {
+  requested:        { label: 'Requested',          bg: 'bg-blue-100', text: 'text-blue-700' },
+  reviewed:         { label: 'Reviewed',           bg: 'bg-purple-100', text: 'text-purple-700' },
+  awaiting_payment: { label: 'Quotation Sent',     bg: 'bg-amber-100', text: 'text-amber-700' },
+  confirmed:        { label: 'Approved',           bg: 'bg-green-100', text: 'text-green-700' },
+  delivered:        { label: 'Processing',         bg: 'bg-emerald-100', text: 'text-emerald-700' },
+  completed:        { label: 'Completed',          bg: 'bg-gray-100', text: 'text-gray-600' },
+  rejected:         { label: 'Rejected',           bg: 'bg-red-100', text: 'text-red-700' },
+  cancelled:        { label: 'Cancelled',          bg: 'bg-red-100', text: 'text-red-700' },
+};
+
 export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliveryPartner, updateOrderStatus, loadMoreOrders, hasMoreOrders, loadingMoreOrders }: AdminOrdersTabProps) {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [bookings, setBookings] = React.useState<BulkBooking[]>([]);
@@ -477,11 +489,36 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
     return () => unsub();
   }, []);
 
-  const updateBookingStatus = async (bookingId: string, newStatus: any) => {
-    await updateDoc(doc(db, 'bulkBookings', bookingId), {
+  const updateBookingStatus = async (booking: BulkBooking, newStatus: any) => {
+    const now = new Date().toISOString();
+    const historyEntry = {
       status: newStatus,
-      updatedAt: new Date().toISOString()
-    });
+      changedBy: 'admin',
+      timestamp: now,
+      notes: `Status updated via Orders Tab to ${newStatus}`
+    };
+    const newHistory = [...(booking.statusHistory || []), historyEntry];
+
+    const updateFields: any = {
+      status: newStatus,
+      updatedAt: now,
+      statusHistory: newHistory
+    };
+
+    if (newStatus === 'completed') {
+      updateFields.completedAt = now;
+    } else if (newStatus === 'confirmed') {
+      updateFields.confirmedAt = now;
+      updateFields.paymentStatus = 'paid';
+      updateFields.advancePaid = true;
+    } else if (newStatus === 'reviewed') {
+      updateFields.reviewedAt = now;
+    } else if (newStatus === 'cancelled') {
+      updateFields.cancelledAt = now;
+      updateFields.cancelledBy = 'admin';
+    }
+
+    await updateDoc(doc(db, 'bulkBookings', booking.id), updateFields);
   };
 
   // Count UTR submissions awaiting admin verification
@@ -548,7 +585,14 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
               <div key={booking.id} className="bg-white p-4 rounded-2xl border border-blue-100 shadow-sm hover:shadow-md hover:border-blue-200 transition-all">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-widest">#{booking.id.slice(-6)}</span>
-                  <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded uppercase">{booking.status}</span>
+                  {(() => {
+                    const style = STATUS_STYLES[booking.status] || { label: booking.status, bg: 'bg-blue-100', text: 'text-blue-700' };
+                    return (
+                      <span className={`text-[10px] font-black ${style.bg} ${style.text} px-2 py-0.5 rounded uppercase`}>
+                        {style.label}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <h4 className="font-bold text-gray-900 mb-0.5">{booking.userName} • {booking.userPhone}</h4>
                 <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-blue-50/50 p-2 rounded-xl border border-blue-50">
@@ -558,16 +602,19 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
                   {booking.notes && <p className="line-clamp-1 italic">"{booking.notes}"</p>}
                 </div>
                 <select 
-                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-blue-500/20"
+                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
                   value={booking.status}
-                  onChange={(e) => updateBookingStatus(booking.id, e.target.value)}
+                  onChange={(e) => updateBookingStatus(booking, e.target.value)}
+                  disabled={booking.status === 'completed' || booking.status === 'cancelled' || booking.status === 'rejected'}
                 >
                   <option value="requested">Requested</option>
                   <option value="reviewed">Reviewed (Awaiting Final Price)</option>
                   <option value="awaiting_payment">Awaiting Adv Payment</option>
                   <option value="confirmed">Confirmed</option>
+                  <option value="delivered">Processing</option>
                   <option value="completed">Completed</option>
-                  <option value="rejected">Rejected/Cancelled</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="cancelled">Cancelled</option>
                 </select>
               </div>
             ))}
@@ -586,7 +633,14 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
               <div key={booking.id} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-200 transition-all">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-black uppercase text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">#{(booking.id).slice(-5)}</span>
-                  <span className="text-[10px] font-black bg-amber-100 text-amber-700 px-2 py-0.5 rounded uppercase">{booking.status}</span>
+                  {(() => {
+                    const style = STATUS_STYLES[booking.status] || { label: booking.status, bg: 'bg-amber-100', text: 'text-amber-700' };
+                    return (
+                      <span className={`text-[10px] font-black ${style.bg} ${style.text} px-2 py-0.5 rounded uppercase`}>
+                        {style.label}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <h4 className="font-bold text-gray-900 mb-0.5">{booking.userName} • {booking.userPhone}</h4>
                 <div className="text-xs text-gray-500 space-y-1 mt-2 mb-3 bg-amber-50/30 p-2 rounded-xl border border-amber-50">
@@ -596,16 +650,19 @@ export default function AdminOrdersTab({ orders, deliveryPartners, assignDeliver
                   {booking.notes && <p className="line-clamp-1 italic">"{booking.notes}"</p>}
                 </div>
                 <select 
-                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-amber-500/20"
+                  className="w-full text-xs p-2 font-bold border rounded-xl bg-gray-50 text-gray-700 focus:ring-2 focus:ring-amber-500/20 disabled:opacity-60 disabled:cursor-not-allowed"
                   value={booking.status}
-                  onChange={(e) => updateBookingStatus(booking.id, e.target.value)}
+                  onChange={(e) => updateBookingStatus(booking, e.target.value)}
+                  disabled={booking.status === 'completed' || booking.status === 'cancelled' || booking.status === 'rejected'}
                 >
                   <option value="requested">Requested</option>
                   <option value="reviewed">Reviewed (Awaiting Final Price)</option>
                   <option value="awaiting_payment">Awaiting Adv Payment</option>
                   <option value="confirmed">Confirmed</option>
+                  <option value="delivered">Processing</option>
                   <option value="completed">Completed</option>
-                  <option value="rejected">Rejected/Cancelled</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="cancelled">Cancelled</option>
                 </select>
               </div>
             ))}

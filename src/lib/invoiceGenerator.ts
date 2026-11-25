@@ -2,7 +2,7 @@
 // This removes ~620KB from the initial bundle load.
 import { Order } from '../types';
 import type jsPDF from 'jspdf';
-import { STORE_CONFIG } from '../config/storeConfig';
+import { getDynamicStoreProfile } from './storeProfile';
 import { COIN_VALUE } from '../config/coins';
 import { doc as fbDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -64,7 +64,10 @@ function checkPage(doc: jsPDF, y: number, margin: number, needed = 30): number {
 // ─── Main PDF Generator ─────────────────────────────────────────────────────
 export async function generateInvoicePDF(order: Order, customerName?: string) {
   // PATCH 5: Dynamic import — jsPDF loaded only when PDF generation is triggered
-  const { default: jsPDF } = await import('jspdf');
+  const [{ default: jsPDF }, storeProfile] = await Promise.all([
+    import('jspdf'),
+    getDynamicStoreProfile(),
+  ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const invoiceId = generateInvoiceId(order.id);
@@ -88,11 +91,11 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.setTextColor(...white);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text(STORE_CONFIG.name.toUpperCase(), margin, 14);
+  doc.text(storeProfile.storeName.toUpperCase(), margin, 14);
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
-  doc.text(STORE_CONFIG.tagline, margin, 21);
+  doc.text(storeProfile.tagline, margin, 21);
 
   // Invoice title — right side
   doc.setFontSize(13);
@@ -110,7 +113,7 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   const col1 = margin;
   const col2 = pageWidth / 2 + 8;
 
-  // ─── FROM (Store details) ─────────────────────────────────────────────
+  // ─── FROM (Store details synced from Admin Settings) ──────────────────
   doc.setTextColor(...grayText);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
@@ -120,22 +123,21 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.setTextColor(...darkText);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text(STORE_CONFIG.name, col1, y);
+  doc.text(storeProfile.storeName, col1, y);
   y += 5;
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...grayText);
-  doc.text(STORE_CONFIG.address, col1, y);
+  const storeAddrLines = doc.splitTextToSize(storeProfile.storeAddress, pageWidth / 2 - margin - 5);
+  doc.text(storeAddrLines, col1, y);
+  y += storeAddrLines.length * 4;
+  doc.text(`Phone: ${storeProfile.phone}`, col1, y);
   y += 4;
-  doc.text(`${STORE_CONFIG.area}, ${STORE_CONFIG.city}, ${STORE_CONFIG.state} — ${STORE_CONFIG.pincode}`, col1, y);
-  y += 4;
-  doc.text(`Phone: ${STORE_CONFIG.phone}`, col1, y);
-  y += 4;
-  doc.text(`Email: ${STORE_CONFIG.email}`, col1, y);
-  if (STORE_CONFIG.gst) {
+  doc.text(`Email: ${storeProfile.email}`, col1, y);
+  if (storeProfile.gst) {
     y += 4;
-    doc.text(`GSTIN: ${STORE_CONFIG.gst}`, col1, y);
+    doc.text(`GSTIN: ${storeProfile.gst}`, col1, y);
   }
 
   // ─── TO (Customer details) ────────────────────────────────────────────
@@ -364,9 +366,17 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   y += 5;
 
   // ─── Total Savings Row ─────────────────────────────────────────────────
-  const totalSavings = (order.couponDiscount || 0)
-    + ((order.coinsDiscountAmount || order.coinsUsed * COIN_VALUE) || 0)
-    + (deliveryCharge === 0 && order.totalAmount >= 500 ? 40 : 0);
+  const deliverySavings =
+    deliveryCharge === 0 &&
+    storeProfile.freeDeliveryThreshold > 0 &&
+    order.totalAmount >= storeProfile.freeDeliveryThreshold
+      ? storeProfile.deliveryFee
+      : 0;
+  const computedSavings =
+    (order.couponDiscount || 0) +
+    ((order.coinsDiscountAmount || order.coinsUsed * COIN_VALUE) || 0) +
+    deliverySavings;
+  const totalSavings = typeof order.totalSavings === 'number' ? order.totalSavings : computedSavings;
   
   if (totalSavings > 0) {
     doc.setFillColor(230, 252, 237);
@@ -391,7 +401,7 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.text('TOTAL PAID', sumLabelX, y + 4);
-  doc.text(fmtAmt(order.finalAmount || Math.round(order.totalAmount)), sumValX, y + 4, { align: 'right' });
+  doc.text(fmtAmt(order.finalAmount ?? Math.round(order.totalAmount)), sumValX, y + 4, { align: 'right' });
 
   y += 22;
 
@@ -408,14 +418,14 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.setTextColor(...grayText);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.text('Thank you for shopping with Kari King!', pageWidth / 2, y, { align: 'center' });
+  doc.text(`Thank you for shopping with ${storeProfile.storeName}!`, pageWidth / 2, y, { align: 'center' });
   y += 5;
 
   doc.setFontSize(7);
   doc.setFont('helvetica', 'normal');
   doc.text('This is a computer-generated invoice and does not require a signature.', pageWidth / 2, y, { align: 'center' });
   y += 4;
-  doc.text(`For queries: ${STORE_CONFIG.phone} | ${STORE_CONFIG.email} | ${STORE_CONFIG.website}`, pageWidth / 2, y, { align: 'center' });
+  doc.text(`For queries: ${storeProfile.phone} | ${storeProfile.email} | ${storeProfile.website}`, pageWidth / 2, y, { align: 'center' });
 
   return doc;
 }

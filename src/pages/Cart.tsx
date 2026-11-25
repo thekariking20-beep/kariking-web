@@ -5,7 +5,8 @@ import { Trash2, Plus, Minus, ShoppingBag, ArrowRight, MapPin, Phone, CreditCard
 import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { useAddress } from '../context/AddressContext';
+import { resolveAddressCoordinates, useAddress } from '../context/AddressContext';
+import { formatDistanceKm, haversineDistanceKm } from '../lib/geo';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../firebase';
 import { doc } from 'firebase/firestore';
@@ -30,7 +31,7 @@ const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 export default function Cart() {
   const { items, removeFromCart, updateQuantity, totalPrice, clearCart, refreshPrices } = useCart();
   const { user, refreshUser } = useAuth();
-  const { selectedAddress } = useAddress();
+  const { selectedAddress, systemSettings, storeLocation } = useAddress();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [orderPlaced, setOrderPlaced] = useState(false);
@@ -86,13 +87,32 @@ export default function Cart() {
   
   const coinsBeingUsed = useCoins ? maxCoinsToUse : 0;
   const coinDiscount = coinsBeingUsed * COIN_VALUE;
-  
+
+  // Dynamic Delivery & Order Settings from Admin -> Order Settings (`settings/system`)
+  const configuredDeliveryFee = Math.max(0, systemSettings.orders.deliveryFee ?? 40);
+  const freeDeliveryThreshold = Math.max(0, systemSettings.orders.freeDeliveryThreshold ?? 0);
+  const minOrderAmount = Math.max(0, systemSettings.orders.minOrderAmount ?? 0);
+  const deliveryEnabled = systemSettings.delivery.enabled !== false;
+
+  const qualifiesForFreeDelivery =
+    totalPrice > 0 && freeDeliveryThreshold > 0 && totalPrice >= freeDeliveryThreshold;
+
   const discountAmount = coinDiscount + couponDiscount;
-  const deliveryFee = totalPrice >= 500 || totalPrice === 0 ? 0 : 40;
-  
+  const deliveryFee = totalPrice === 0 || qualifiesForFreeDelivery ? 0 : configuredDeliveryFee;
+  const deliverySavings = qualifiesForFreeDelivery ? configuredDeliveryFee : 0;
+
   const finalTotal = Math.round((Math.max(0, totalPrice - discountAmount) + deliveryFee) * 100) / 100;
-  const totalSavings = discountAmount + (deliveryFee === 0 && totalPrice >= 500 ? 40 : 0);
+  const totalSavings = discountAmount + deliverySavings;
   const canPayFullyWithCoins = false; // We enforce minimum payable > 1, so full payment with coins alone is not possible
+
+  // Delivery Address Coordinates & Distance (Non-blocking warning if beyond store maxRadiusKm)
+  const deliveryCoords = useMemo(() => resolveAddressCoordinates(selectedAddress), [selectedAddress]);
+  const deliveryDistanceKm = useMemo(() => {
+    if (!deliveryCoords) return null;
+    return haversineDistanceKm(deliveryCoords.lat, deliveryCoords.lng, storeLocation.lat, storeLocation.lng);
+  }, [deliveryCoords, storeLocation.lat, storeLocation.lng]);
+  const isBeyondStoreRadius =
+    deliveryDistanceKm !== null && deliveryDistanceKm > storeLocation.maxRadiusKm;
 
   // ─── Pre-computed UPI string (instant, no API call) ───────────────────
   const upiAmount = useMemo(() => (Math.round(finalTotal * 100) / 100).toFixed(2), [finalTotal]);
@@ -166,6 +186,10 @@ export default function Cart() {
 
   const getValidationError = () => {
     if (items.length === 0) return 'Cart empty';
+    if (!deliveryEnabled) return 'Deliveries are currently paused by the store. Please check back later.';
+    if (minOrderAmount > 0 && totalPrice < minOrderAmount) {
+      return `Minimum order amount is ₹${minOrderAmount}. Add ₹${Math.ceil(minOrderAmount - totalPrice)} more to continue.`;
+    }
     if (!address) return 'Address missing. Please set your delivery location.';
     if (!phone || phone.length < 10) return 'Valid phone number required.';
     if (!paymentMethod && !(canPayFullyWithCoins && useCoins)) return 'Select a payment method.';
@@ -212,7 +236,9 @@ export default function Cart() {
           items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
           address, phone, useCoins, coinsToUse: coinsBeingUsed,
           paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
-          couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
+          couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount,
+          ...(deliveryCoords ? { deliveryLat: deliveryCoords.lat, deliveryLng: deliveryCoords.lng } : {}),
+          ...(deliveryDistanceKm !== null ? { deliveryDistanceKm: Number(deliveryDistanceKm.toFixed(2)) } : {}),
         });
         const data = response.data as { success: boolean; orderId: string; finalAmount: number };
         if (data?.success) {
@@ -255,7 +281,9 @@ export default function Cart() {
             items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
             address, phone, useCoins, coinsToUse: coinsBeingUsed,
             paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
-            couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
+            couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount,
+            ...(deliveryCoords ? { deliveryLat: deliveryCoords.lat, deliveryLng: deliveryCoords.lng } : {}),
+            ...(deliveryDistanceKm !== null ? { deliveryDistanceKm: Number(deliveryDistanceKm.toFixed(2)) } : {}),
           });
           const data = response.data as { success: boolean; orderId: string };
           if (data?.success && data.orderId) {
@@ -318,7 +346,9 @@ export default function Cart() {
         items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
         address, phone, useCoins, coinsToUse: coinsBeingUsed,
         paymentMethod: effectiveMethod, deliveryFee, idempotencyKey: iKey,
-        couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount
+        couponCode: appliedCoupon?.code || '', couponDiscount: couponDiscount,
+        ...(deliveryCoords ? { deliveryLat: deliveryCoords.lat, deliveryLng: deliveryCoords.lng } : {}),
+        ...(deliveryDistanceKm !== null ? { deliveryDistanceKm: Number(deliveryDistanceKm.toFixed(2)) } : {}),
       });
       const data = response.data as { success: boolean; orderId: string; finalAmount: number };
       if (data?.success) {
@@ -516,10 +546,10 @@ export default function Cart() {
         <div className="premium-card p-6 sticky top-24">
           <h2 className="text-xl font-bold text-gray-900 mb-6">Order Summary</h2>
           
-          {totalPrice > 0 && totalPrice < 500 && (
+          {freeDeliveryThreshold > 0 && totalPrice > 0 && totalPrice < freeDeliveryThreshold && (
             <div className="bg-orange-50/80 border border-orange-100 p-4 rounded-xl mb-6 text-center shadow-sm">
               <p className="text-orange-800 font-bold text-sm leading-relaxed">
-                Add <span className="text-[#7A0000] border-b-2 border-red-200/50">₹{500 - totalPrice}</span> more for <span className="font-black pt-1 block text-lg uppercase tracking-wider text-green-600">🎉 FREE delivery!</span>
+                Add <span className="text-[#7A0000] border-b-2 border-red-200/50">₹{Math.ceil(freeDeliveryThreshold - totalPrice)}</span> more for <span className="font-black pt-1 block text-lg uppercase tracking-wider text-green-600">🎉 FREE delivery!</span>
               </p>
             </div>
           )}
@@ -756,8 +786,16 @@ export default function Cart() {
                 <div className="flex-1 pr-4">
                   {address ? (
                     <>
-                      <div className="flex items-center gap-2 mb-0.5">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                         <span className="bg-red-50 text-red-600 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded">{selectedAddress?.name || 'Home'}</span>
+                        {deliveryDistanceKm !== null && (
+                          <span className={cn(
+                            'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded',
+                            isBeyondStoreRadius ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'
+                          )}>
+                            {formatDistanceKm(deliveryDistanceKm, false)} from {storeLocation.name}
+                          </span>
+                        )}
                       </div>
                       <h4 className="font-bold text-gray-900 text-sm mb-0.5">{selectedAddress?.street || address.split(',')[0]}</h4>
                       <p className="text-xs text-gray-500">{selectedAddress?.city || ''} {selectedAddress?.pincode ? `- ${selectedAddress.pincode}` : ''}</p>
@@ -770,6 +808,14 @@ export default function Cart() {
                   {address ? 'Change' : 'Set'}
                 </span>
               </div>
+              {isBeyondStoreRadius && deliveryDistanceKm !== null && (
+                <div className="mt-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900 font-semibold">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>
+                    Your delivery address is <span className="font-black">{formatDistanceKm(deliveryDistanceKm)}</span> from {storeLocation.name}, beyond our standard {storeLocation.maxRadiusKm} km radius. Delivery confirmation is subject to store approval.
+                  </span>
+                </div>
+              )}
             </div>
             <div>
               <label className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
@@ -1049,6 +1095,7 @@ export default function Cart() {
       <LocationPickerModal
         isOpen={isLocationOpen}
         onClose={() => setIsLocationOpen(false)}
+        initialTab="address"
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { User as UserIcon, Store, ShoppingCart, Truck, Bell, Shield, Save, Camera, Mail, Phone, Lock, Eye, EyeOff, MapPin, Check, Trash2, Loader2 } from 'lucide-react';
+import { User as UserIcon, Store, ShoppingCart, Truck, Bell, Shield, Save, Camera, Mail, Phone, Lock, Eye, EyeOff, MapPin, Check, Trash2, Loader2, Navigation, RotateCcw, AlertTriangle } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
@@ -10,44 +10,22 @@ import { cn } from '../../lib/utils';
 import { useNavigate } from 'react-router-dom';
 import ImageUploadDropzone from '../ImageUploadDropzone';
 import StaffManagement from './StaffManagement';
+import LocalRadarPicker from '../location/LocalRadarPicker';
+import { STORE_CONFIG } from '../../config/storeConfig';
+import { searchOfflineLocations } from '../../config/locationDataset';
+import { DEFAULT_SYSTEM_SETTINGS, hasLegacyPlaceholderBusiness, mergeSystemSettings } from '../../lib/storeProfile';
 import bcrypt from 'bcryptjs';
 import { updatePassword } from 'firebase/auth';
 import { cleanupDuplicateUsers, CleanupReport } from '../../lib/cleanupDuplicates';
-
-const defaultSettings: SystemSettings = {
-  business: {
-    storeName: 'Kari King',
-    storeAddress: '123 Market Road, City Center',
-    contactNumber: '+91 90000 00000',
-    contactEmail: 'admin@kariking.in',
-    openingHours: '08:00 AM - 09:00 PM'
-  },
-  orders: {
-    minOrderAmount: 500,
-    deliveryFee: 40,
-    freeDeliveryThreshold: 1000
-  },
-  delivery: {
-    enabled: true,
-    maxRadiusKm: 15,
-    autoAssign: false
-  },
-  notifications: {
-    newOrderAlerts: true,
-    deliveryUpdates: true,
-    kycRequests: true
-  },
-  security: {
-    requireOtp: true
-  },
-  updatedAt: new Date().toISOString()
-};
 
 export default function AdminSettings() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'profile' | 'business' | 'orders' | 'delivery' | 'notifications' | 'security' | 'staff'>('profile');
-  const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
+  const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SYSTEM_SETTINGS);
+  const [hasLegacyPlaceholder, setHasLegacyPlaceholder] = useState(false);
+  const [showStoreRadar, setShowStoreRadar] = useState(false);
+  const [capturingGps, setCapturingGps] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ show: boolean, message: string, type: 'success' | 'error' }>({ show: false, message: '', type: 'success' });
@@ -91,9 +69,13 @@ export default function AdminSettings() {
       const docRef = doc(db, 'settings', 'system');
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
-        setSettings({ ...defaultSettings, ...(docSnap.data() as SystemSettings) });
+        const raw = docSnap.data() as Partial<SystemSettings>;
+        setHasLegacyPlaceholder(hasLegacyPlaceholderBusiness(raw));
+        setSettings(mergeSystemSettings(raw));
       } else {
-        await setDoc(docRef, defaultSettings);
+        await setDoc(docRef, DEFAULT_SYSTEM_SETTINGS);
+        setSettings(DEFAULT_SYSTEM_SETTINGS);
+        setHasLegacyPlaceholder(false);
       }
     } catch (err) {
       console.error("Error fetching settings:", err);
@@ -108,11 +90,56 @@ export default function AdminSettings() {
   };
 
   const saveSettings = async () => {
+    const trimmedName = settings.business.storeName?.trim() || '';
+    const trimmedAddress = settings.business.storeAddress?.trim() || '';
+    const trimmedPhone = settings.business.contactNumber?.trim() || '';
+    const trimmedEmail = settings.business.contactEmail?.trim() || '';
+
+    if (!trimmedName || !trimmedAddress) {
+      showToast('Store Name and Store Address cannot be empty.', 'error');
+      return;
+    }
+
+    const lat = Number(settings.business.storeLat);
+    const lng = Number(settings.business.storeLng);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      showToast('Please enter valid store latitude (-90..90) and longitude (-180..180).', 'error');
+      return;
+    }
+
+    const sanitizedSettings: SystemSettings = {
+      ...settings,
+      business: {
+        ...settings.business,
+        storeName: trimmedName,
+        storeAddress: trimmedAddress,
+        contactNumber: trimmedPhone || STORE_CONFIG.phone,
+        contactEmail: trimmedEmail || STORE_CONFIG.email,
+        openingHours: settings.business.openingHours?.trim() || '07:00 AM - 09:00 PM',
+        storeLat: lat,
+        storeLng: lng,
+        gst: (settings.business.gst || '').trim().toUpperCase(),
+      },
+      orders: {
+        minOrderAmount: Math.max(0, Number(settings.orders.minOrderAmount) || 0),
+        deliveryFee: Math.max(0, Number(settings.orders.deliveryFee) || 0),
+        freeDeliveryThreshold: Math.max(0, Number(settings.orders.freeDeliveryThreshold) || 0),
+      },
+      delivery: {
+        ...settings.delivery,
+        maxRadiusKm: Math.max(1, Number(settings.delivery.maxRadiusKm) || STORE_CONFIG.defaultMaxRadiusKm),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
     setSaving(true);
     try {
-      const updatedSettings = { ...settings, updatedAt: new Date().toISOString() };
-      await setDoc(doc(db, 'settings', 'system'), updatedSettings);
-      setSettings(updatedSettings);
+      await setDoc(doc(db, 'settings', 'system'), sanitizedSettings);
+      setSettings(sanitizedSettings);
+      try {
+        localStorage.setItem('kk_system_settings_cache', JSON.stringify(sanitizedSettings));
+      } catch { /* ignore storage quota */ }
+      setHasLegacyPlaceholder(false);
       showToast("Settings updated successfully");
     } catch (err) {
       console.error("Error saving settings:", err);
@@ -120,6 +147,38 @@ export default function AdminSettings() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const captureStoreGps = () => {
+    if (!('geolocation' in navigator)) {
+      showToast('GPS geolocation is not supported on this browser.', 'error');
+      return;
+    }
+    setCapturingGps(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setSettings((prev) => ({
+          ...prev,
+          business: {
+            ...prev.business,
+            storeLat: Number(pos.coords.latitude.toFixed(5)),
+            storeLng: Number(pos.coords.longitude.toFixed(5)),
+          },
+        }));
+        setCapturingGps(false);
+        showToast('Store GPS coordinates captured! Remember to click Save Changes.');
+      },
+      (err) => {
+        setCapturingGps(false);
+        showToast(
+          err.code === err.PERMISSION_DENIED
+            ? 'GPS permission denied. Use the Radar Picker or enter coordinates manually.'
+            : 'Unable to get GPS fix. Use the Radar Picker or enter coordinates.',
+          'error'
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
   };
 
   const saveProfile = async (e: React.FormEvent) => {
@@ -377,12 +436,48 @@ export default function AdminSettings() {
             {/* BUSINESS SETTINGS */}
             {activeTab === 'business' && (
               <div className="space-y-6 max-w-2xl">
+                <div className="bg-blue-50/70 p-4 rounded-2xl border border-blue-100 flex items-start gap-3">
+                  <Store className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-blue-900">
+                    <p className="font-bold">Synced with Customer Invoices &amp; Quotations</p>
+                    <p className="text-blue-700 mt-0.5">
+                      Store Name, Store Address, Contact Number, Support Email, and GSTIN saved here appear automatically on all newly generated PDF invoices and quotations.
+                    </p>
+                  </div>
+                </div>
+
+                {hasLegacyPlaceholder && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-amber-900">
+                        <p className="font-bold">Placeholder detected in saved settings</p>
+                        <p className="text-amber-700 mt-0.5">
+                          Showing default Kari King details safely. Click Save Changes to persist your updated address to Firestore.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          business: { ...DEFAULT_SYSTEM_SETTINGS.business },
+                        }))
+                      }
+                      className="shrink-0 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" /> Reset Defaults
+                    </button>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Store Name</label>
                   <input type="text" value={settings.business.storeName} onChange={(e) => setSettings({...settings, business: {...settings.business, storeName: e.target.value}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-bold text-gray-900 outline-none" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Store Address</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Store Address (Prints on Invoices)</label>
                   <textarea rows={3} value={settings.business.storeAddress} onChange={(e) => setSettings({...settings, business: {...settings.business, storeAddress: e.target.value}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-medium text-gray-900 outline-none resize-none" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -394,10 +489,122 @@ export default function AdminSettings() {
                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Support Email</label>
                     <input type="email" value={settings.business.contactEmail} onChange={(e) => setSettings({...settings, business: {...settings.business, contactEmail: e.target.value}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-bold text-gray-900 outline-none" />
                   </div>
-                  <div className="md:col-span-2">
+                  <div>
                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Opening Hours</label>
                     <input type="text" value={settings.business.openingHours} onChange={(e) => setSettings({...settings, business: {...settings.business, openingHours: e.target.value}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-medium text-gray-900 outline-none" placeholder="e.g. 09:00 AM - 10:00 PM" />
                   </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">GSTIN (Optional)</label>
+                    <input type="text" value={settings.business.gst || ''} onChange={(e) => setSettings({...settings, business: {...settings.business, gst: e.target.value.toUpperCase()}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-bold text-gray-900 outline-none uppercase" placeholder="e.g. 33AABCK1234F1ZP" />
+                  </div>
+                </div>
+
+                {/* Store Coordinates for Offline Radius Calculation */}
+                <div className="p-5 bg-gray-50 border border-gray-200 rounded-2xl space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="font-bold text-gray-900 flex items-center gap-2 text-sm">
+                        <MapPin className="w-4 h-4 text-red-600" /> Store Location Coordinates
+                      </h4>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        Used to compute customer distances and radius availability offline (zero external APIs).
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={captureStoreGps}
+                        disabled={capturingGps}
+                        className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {capturingGps ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5" />}
+                        {capturingGps ? 'Locating...' : 'Capture GPS'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowStoreRadar(!showStoreRadar)}
+                        className="px-3 py-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-800 rounded-xl text-xs font-bold"
+                      >
+                        {showStoreRadar ? 'Hide Radar' : 'Radar Picker'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Preset Area Fill</label>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const entry = searchOfflineLocations('').find((l) => l.id === e.target.value);
+                          if (!entry) return;
+                          setSettings((prev) => ({
+                            ...prev,
+                            business: { ...prev.business, storeLat: entry.lat, storeLng: entry.lng },
+                          }));
+                        }}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-700 outline-none"
+                      >
+                        <option value="">Select preset town...</option>
+                        {searchOfflineLocations('').map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.name} ({loc.pincode})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Store Latitude</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={settings.business.storeLat ?? STORE_CONFIG.lat}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (Number.isFinite(val)) {
+                            setSettings({ ...settings, business: { ...settings.business, storeLat: val } });
+                          }
+                        }}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-xs text-gray-900 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Store Longitude</label>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={settings.business.storeLng ?? STORE_CONFIG.lng}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (Number.isFinite(val)) {
+                            setSettings({ ...settings, business: { ...settings.business, storeLng: val } });
+                          }
+                        }}
+                        className="w-full px-3 py-2.5 bg-white border border-gray-200 rounded-xl font-bold text-xs text-gray-900 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {showStoreRadar && (
+                    <LocalRadarPicker
+                      storeLat={settings.business.storeLat ?? STORE_CONFIG.lat}
+                      storeLng={settings.business.storeLng ?? STORE_CONFIG.lng}
+                      anchorLat={STORE_CONFIG.lat}
+                      anchorLng={STORE_CONFIG.lng}
+                      storeName={settings.business.storeName}
+                      radiusKm={settings.delivery.maxRadiusKm}
+                      maxRadiusKm={settings.delivery.maxRadiusKm}
+                      lat={settings.business.storeLat ?? STORE_CONFIG.lat}
+                      lng={settings.business.storeLng ?? STORE_CONFIG.lng}
+                      mode="admin"
+                      onChange={(newLat, newLng) =>
+                        setSettings((prev) => ({
+                          ...prev,
+                          business: { ...prev.business, storeLat: newLat, storeLng: newLng },
+                        }))
+                      }
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -411,7 +618,7 @@ export default function AdminSettings() {
                   </div>
                   <div>
                     <h4 className="font-bold text-gray-900">Order Constraints</h4>
-                    <p className="text-sm text-gray-500 mt-1">These settings affect checkout behavior on the customer app.</p>
+                    <p className="text-sm text-gray-500 mt-1">These settings automatically sync with the Cart, Navigation Drawer, and Checkout calculation in real time.</p>
                   </div>
                 </div>
 
@@ -461,6 +668,21 @@ export default function AdminSettings() {
                     <div>
                       <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">Max Delivery Radius (km)</label>
                       <input type="number" value={settings.delivery.maxRadiusKm} onChange={(e) => setSettings({...settings, delivery: {...settings.delivery, maxRadiusKm: Number(e.target.value)}})} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:bg-white focus:ring-4 focus:ring-gray-900/10 focus:border-gray-900 transition-all font-black text-gray-900 outline-none" />
+                    </div>
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Store Coordinates</p>
+                        <p className="text-xs font-bold text-gray-800 mt-1">
+                          {(settings.business.storeLat ?? STORE_CONFIG.lat).toFixed(4)}, {(settings.business.storeLng ?? STORE_CONFIG.lng).toFixed(4)}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('business')}
+                        className="text-xs font-bold text-red-600 hover:underline shrink-0"
+                      >
+                        Edit Pin
+                      </button>
                     </div>
                  </div>
 

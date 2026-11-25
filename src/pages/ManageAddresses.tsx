@@ -5,8 +5,9 @@ import {
   ArrowLeft, Plus, MapPin, Trash2, Home, Briefcase, 
   CheckCircle2 
 } from 'lucide-react';
-import { useAddress } from '../context/AddressContext';
+import { resolveAddressCoordinates, useAddress } from '../context/AddressContext';
 import LocationPickerModal from '../components/location/LocationPickerModal';
+import { formatDistanceKm, haversineDistanceKm } from '../lib/geo';
 import { cn } from '../lib/utils';
 
 const tagIcons = {
@@ -17,7 +18,7 @@ const tagIcons = {
 
 export default function ManageAddresses() {
   const navigate = useNavigate();
-  const { addresses, loading, setDefaultAddress, deleteAddress, selectedAddress } = useAddress();
+  const { addresses, loading, setDefaultAddress, deleteAddress, selectedAddress, storeLocation } = useAddress();
   const [showLocationModal, setShowLocationModal] = useState(false);
 
   const handleDelete = async (id: string) => {
@@ -81,10 +82,26 @@ export default function ManageAddresses() {
                     <h3 className="font-bold text-gray-900 leading-none mb-1.5">{addr.name}</h3>
                     <p className="text-sm text-gray-700 font-medium leading-snug">{addr.street}</p>
                     <p className="text-sm text-gray-500 leading-snug">{addr.city} - {addr.pincode}</p>
+                    {(() => {
+                      const coords = resolveAddressCoordinates(addr);
+                      if (!coords) {
+                        return (
+                          <p className="text-[11px] text-amber-600 font-bold mt-1.5">
+                            Legacy address (no coordinates mapped yet)
+                          </p>
+                        );
+                      }
+                      const dist = haversineDistanceKm(coords.lat, coords.lng, storeLocation.lat, storeLocation.lng);
+                      return (
+                        <p className="text-[11px] text-emerald-700 font-bold mt-1.5">
+                          {formatDistanceKm(dist)} from {storeLocation.name}
+                        </p>
+                      );
+                    })()}
                     
                     <div className="mt-4 flex gap-3">
                       {addr.id !== selectedAddress?.id && (
-                        <button onClick={() => setDefaultAddress(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set Selected</button>
+                        <button onClick={() => setDefaultAddress(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set Selected &amp; Point Here</button>
                       )}
                     </div>
                   </div>
@@ -101,14 +118,11 @@ export default function ManageAddresses() {
         )}
       </div>
 
-      <AnimatePresence>
-        {showLocationModal && (
-          <LocationPickerModal
-            isOpen={true}
-            onClose={() => setShowLocationModal(false)}
-          />
-        )}
-      </AnimatePresence>
+      <LocationPickerModal
+        isOpen={showLocationModal}
+        onClose={() => setShowLocationModal(false)}
+        initialTab="address"
+      />
     </div>
   );
 }

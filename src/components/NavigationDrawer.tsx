@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useAddress } from '../context/AddressContext';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { 
@@ -19,13 +20,18 @@ interface NavigationDrawerProps {
 export default function NavigationDrawer({ isOpen, onClose }: NavigationDrawerProps) {
   const { user, logout } = useAuth();
   const { totalPrice } = useCart();
+  const { systemSettings, displayLocation } = useAddress();
   const location = useLocation();
   const [hasActiveOrder, setHasActiveOrder] = useState(false);
 
-  // Free delivery threshold
-  const FREE_DELIVERY_THRESHOLD = 500;
-  const progressPct = Math.min((totalPrice / FREE_DELIVERY_THRESHOLD) * 100, 100);
-  const remainingForFreeDelivery = Math.max(FREE_DELIVERY_THRESHOLD - totalPrice, 0);
+  // Free delivery threshold synced with Admin Order Settings
+  const FREE_DELIVERY_THRESHOLD = Math.max(0, systemSettings.orders.freeDeliveryThreshold ?? 0);
+  const progressPct = FREE_DELIVERY_THRESHOLD > 0
+    ? Math.min((totalPrice / FREE_DELIVERY_THRESHOLD) * 100, 100)
+    : 100;
+  const remainingForFreeDelivery = FREE_DELIVERY_THRESHOLD > 0
+    ? Math.max(FREE_DELIVERY_THRESHOLD - totalPrice, 0)
+    : 0;
 
   // Check for active orders
   useEffect(() => {
@@ -91,7 +97,9 @@ export default function NavigationDrawer({ isOpen, onClose }: NavigationDrawerPr
                       <h2 className="text-xl font-black text-white leading-tight">{user.name || 'Hey there!'}</h2>
                       <div className="flex items-center gap-1 text-red-100 mt-1">
                         <MapPin className="w-3 h-3" />
-                        <span className="text-xs font-medium truncate max-w-[150px]">{user.address || 'Set your location'}</span>
+                        <span className="text-xs font-medium truncate max-w-[150px]">
+                          {displayLocation !== 'Set Location' ? displayLocation : (user.address || 'Set your location')}
+                        </span>
                       </div>
                     </>
                   ) : (
@@ -109,24 +117,26 @@ export default function NavigationDrawer({ isOpen, onClose }: NavigationDrawerPr
                 {/* ─── 2. VALUE ADD CARDS ─── */}
                 <div className="space-y-3">
                   {/* Free Delivery Bar */}
-                  <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
-                    <div className="flex justify-between items-end mb-2">
-                      <div className="flex items-center gap-2">
-                        <Truck className="w-4 h-4 text-red-500 shrink-0" />
-                        <p className="text-xs font-bold text-gray-700">Free Delivery</p>
+                  {FREE_DELIVERY_THRESHOLD > 0 && (
+                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                      <div className="flex justify-between items-end mb-2">
+                        <div className="flex items-center gap-2">
+                          <Truck className="w-4 h-4 text-red-500 shrink-0" />
+                          <p className="text-xs font-bold text-gray-700">Free Delivery</p>
+                        </div>
+                        <span className="text-[10px] font-black text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+                          {remainingForFreeDelivery <= 0 ? 'UNLOCKED' : `Add ₹${Math.ceil(remainingForFreeDelivery)}`}
+                        </span>
                       </div>
-                      <span className="text-[10px] font-black text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
-                        {remainingForFreeDelivery <= 0 ? 'UNLOCKED' : `Add ₹${remainingForFreeDelivery}`}
-                      </span>
+                      <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                        <motion.div 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progressPct}%` }}
+                          className={cn("h-full rounded-full transition-all duration-1000", progressPct >= 100 ? "bg-green-500" : "bg-red-500")}
+                        />
+                      </div>
                     </div>
-                    <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progressPct}%` }}
-                        className={cn("h-full rounded-full transition-all duration-1000", progressPct >= 100 ? "bg-green-500" : "bg-red-500")}
-                      />
-                    </div>
-                  </div>
+                  )}
 
                   {/* Active Order Live Tracker */}
                   {hasActiveOrder && (

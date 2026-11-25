@@ -9,9 +9,11 @@ import { cn } from '../lib/utils';
 interface ProductCardProps {
   product: Product;
   key?: React.Key;
+  locationUnavailable?: boolean;
+  unavailableLabel?: string;
 }
 
-export default function ProductCard({ product }: ProductCardProps) {
+export default function ProductCard({ product, locationUnavailable = false, unavailableLabel = 'Out of Range' }: ProductCardProps) {
   const { addToCart, items, updateQuantity } = useCart();
   const cartItem = items.find(i => i.productId === product.id);
 
@@ -56,7 +58,8 @@ export default function ProductCard({ product }: ProductCardProps) {
           decoding="async"
           className={cn(
             "absolute inset-0 w-full h-full object-cover transition-all",
-            product.isComingSoon && "grayscale-[50%] opacity-80 blur-[2px] scale-105"
+            product.isComingSoon && "grayscale-[50%] opacity-80 blur-[2px] scale-105",
+            locationUnavailable && product.isAvailable && !product.isComingSoon && "grayscale-[40%] opacity-75"
           )}
           referrerPolicy="no-referrer"
         />
@@ -72,6 +75,12 @@ export default function ProductCard({ product }: ProductCardProps) {
           <div className="absolute inset-0 bg-black/55 flex items-center justify-center backdrop-blur-[2px]">
             <span className="bg-white text-gray-900 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider shadow-md">
               Sold Out
+            </span>
+          </div>
+        ) : locationUnavailable ? (
+          <div className="absolute inset-0 bg-black/45 flex items-center justify-center backdrop-blur-[1px]">
+            <span className="bg-amber-500 text-white px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider shadow-md">
+              {unavailableLabel}
             </span>
           </div>
         ) : product.discountPercentage ? (
@@ -155,7 +164,8 @@ export default function ProductCard({ product }: ProductCardProps) {
                     <motion.button
                       whileTap={{ scale: 0.8 }}
                       onClick={handlePlus}
-                      className="text-white rounded p-0.5 active:bg-white/20"
+                      disabled={locationUnavailable}
+                      className="text-white rounded p-0.5 active:bg-white/20 disabled:opacity-40"
                       aria-label="Increase quantity"
                     >
                       <Plus className="w-3.5 h-3.5" />
@@ -165,8 +175,8 @@ export default function ProductCard({ product }: ProductCardProps) {
                   <motion.button
                     whileTap={{ scale: 0.85 }}
                     onClick={() => addToCart(product)}
-                    disabled={!product.isAvailable}
-                    className="text-white p-[7px] rounded-xl disabled:opacity-40 active:scale-95 shrink-0 shadow-lg"
+                    disabled={!product.isAvailable || locationUnavailable}
+                    className="text-white p-[7px] rounded-xl disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 shrink-0 shadow-lg"
                     style={{
                       background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
                       boxShadow: '0 4px 14px rgba(220,38,38,0.3)',

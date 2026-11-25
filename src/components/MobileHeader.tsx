@@ -40,15 +40,15 @@ export default function MobileHeader() {
 
           {/* RIGHT — Location Selector */}
           <button
-            onClick={() => user ? setIsLocationOpen(true) : navigate('/login')}
-            className="flex flex-col items-end max-w-[110px]"
+            onClick={() => setIsLocationOpen(true)}
+            className="flex flex-col items-end max-w-[125px]"
           >
             <div className="flex items-center gap-0.5">
               <MapPin className="w-3 h-3 text-amber-300 shrink-0" />
-              <span className="text-white font-bold text-xs truncate max-w-[80px]">{displayLocation}</span>
+              <span className="text-white font-bold text-xs truncate max-w-[92px]">{displayLocation}</span>
               <ChevronDown className="w-3 h-3 text-white/60 shrink-0" />
             </div>
-            <span className="text-[9px] text-white/50 font-medium truncate max-w-[110px]">{displayCity}</span>
+            <span className="text-[9px] text-white/75 font-medium truncate max-w-[125px]">{displayCity}</span>
           </button>
         </div>
       </header>

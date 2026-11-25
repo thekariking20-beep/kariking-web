@@ -5,10 +5,12 @@ import { Product } from '../types';
 import ProductCard from '../components/ProductCard';
 import ProductGrid from '../components/ProductGrid';
 import { useSearchParams } from 'react-router-dom';
-import { Search, SlidersHorizontal, X } from 'lucide-react';
+import { Search, SlidersHorizontal, X, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useCategories } from '../context/CategoriesContext';
+import { useAddress } from '../context/AddressContext';
+import StoreAvailabilityBar from '../components/location/StoreAvailabilityBar';
 
 export default function Products() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -16,7 +18,9 @@ export default function Products() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [inRangeOnly, setInRangeOnly] = useState(false);
   const { categories: MAIN_CATEGORIES } = useCategories();
+  const { isOutsideSelectedRadius, radiusKm } = useAddress();
 
   const currentCategory = searchParams.get('category') || 'all';
   const currentSub = searchParams.get('sub') || '';
@@ -49,7 +53,11 @@ export default function Products() {
   };
 
   const filteredProducts = useMemo(() => {
+    if (inRangeOnly && isOutsideSelectedRadius) return [];
+
     return products.filter(p => {
+      if (inRangeOnly && (!p.isAvailable || p.isComingSoon)) return false;
+
       const resolved = resolveCategory(p);
       const mainMatch =
         currentCategory === 'all' ||
@@ -67,7 +75,7 @@ export default function Products() {
 
       return mainMatch && subMatch && textMatch;
     });
-  }, [products, currentCategory, currentSub, searchQuery]);
+  }, [products, currentCategory, currentSub, searchQuery, inRangeOnly, isOutsideSelectedRadius]);
 
   const setCategory = (cat: string) => {
     if (cat === 'all') {
@@ -87,6 +95,7 @@ export default function Products() {
 
   const clearAll = () => {
     setSearchQuery('');
+    setInRangeOnly(false);
     setSearchParams({});
   };
 
@@ -123,6 +132,19 @@ export default function Products() {
             )}
           </div>
           <button
+            onClick={() => setInRangeOnly(!inRangeOnly)}
+            className={cn(
+              'px-3 py-2.5 rounded-xl border text-xs font-black transition-colors flex items-center gap-1.5 shrink-0',
+              inRangeOnly
+                ? 'bg-green-600 text-white border-green-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:border-green-500'
+            )}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="hidden sm:inline">Available Only</span>
+            <span className="sm:hidden">In Range</span>
+          </button>
+          <button
             onClick={() => setShowFilters(!showFilters)}
             className={cn(
               'p-2.5 rounded-xl border transition-colors md:hidden',
@@ -133,6 +155,15 @@ export default function Products() {
           </button>
         </div>
       </div>
+
+      {/* Store distance & radius availability bar */}
+      <StoreAvailabilityBar
+        availableProductCount={
+          isOutsideSelectedRadius
+            ? 0
+            : products.filter((p) => p.isAvailable && !p.isComingSoon).length
+        }
+      />
 
       {/* Main category chips — desktop */}
       <div className="hidden md:flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none flex-wrap">
@@ -239,7 +270,7 @@ export default function Products() {
       {!loading && (
         <p className="text-sm text-gray-500">
           Showing <span className="font-bold text-gray-900">{filteredProducts.length}</span> products
-          {(currentCategory !== 'all' || searchQuery) && (
+          {(currentCategory !== 'all' || searchQuery || inRangeOnly) && (
             <button onClick={clearAll} className="ml-3 text-red-600 font-bold hover:underline text-xs">
               Clear filters
             </button>
@@ -255,14 +286,22 @@ export default function Products() {
           ))}
         </div>
       ) : filteredProducts.length > 0 ? (
-        <ProductGrid products={filteredProducts} />
+        <ProductGrid products={filteredProducts} locationUnavailable={isOutsideSelectedRadius} />
       ) : (
         <div className="text-center py-20 bg-white rounded-3xl border border-gray-100 shadow-sm">
           <div className="bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
             <Search className="w-8 h-8 text-gray-300" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">No products found</h3>
-          <p className="text-gray-500 text-sm">Try adjusting your search or category filter.</p>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">
+            {inRangeOnly && isOutsideSelectedRadius
+              ? `No stores within ${radiusKm} km`
+              : 'No products found'}
+          </h3>
+          <p className="text-gray-500 text-sm">
+            {inRangeOnly && isOutsideSelectedRadius
+              ? 'Expand your radius above or change your pointing location to order.'
+              : 'Try adjusting your search or category filter.'}
+          </p>
           <button
             onClick={clearAll}
             className="mt-6 text-red-600 font-bold hover:underline"

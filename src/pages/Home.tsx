@@ -14,7 +14,9 @@ import { cn } from '../lib/utils';
 import { useCategories } from '../context/CategoriesContext';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useAddress } from '../context/AddressContext';
 import { useRewardCampaign } from '../hooks/useRewardCampaign';
+import StoreAvailabilityBar from '../components/location/StoreAvailabilityBar';
 
 // ─── Default CMS content used when Firestore has nothing yet ─────────────────
 const DEFAULT_BANNERS: HomepageContent[] = [
@@ -78,6 +80,7 @@ const features = [
 export default function Home() {
   const { user } = useAuth();
   const { addToCart } = useCart();
+  const { isOutsideSelectedRadius, systemSettings } = useAddress();
   const navigate = useNavigate();
   const { categories: MAIN_CATEGORIES } = useCategories();
   const { activeCampaign } = useRewardCampaign();
@@ -263,9 +266,31 @@ export default function Home() {
     // Also include CMS-managed offers (from homepageContent collection)
     const cmsOffers = visibleCms.filter(c => c.type === 'offer');
 
-    // Always show: Firestore coupons + CMS offers + default promos
-    return [...couponOffers, ...cmsOffers, ...DEFAULT_OFFERS];
-  }, [firestoreCoupons, visibleCms]);
+    // Keep free-delivery promo card synced with Admin Order Settings
+    const freeThresh = systemSettings.orders.freeDeliveryThreshold;
+    const deliveryFee = systemSettings.orders.deliveryFee;
+    const syncedDefaultOffers = DEFAULT_OFFERS.flatMap((offer) => {
+      if (offer.id !== 'default-offer-2') return [offer];
+      if (deliveryFee === 0) {
+        return [{
+          ...offer,
+          title: 'Free Delivery on All Orders',
+          subtitle: 'Zero delivery fee on every order today',
+        }];
+      }
+      if (freeThresh > 0) {
+        return [{
+          ...offer,
+          title: `Free Delivery above ₹${freeThresh}`,
+          subtitle: 'Add more to your cart and save on delivery',
+        }];
+      }
+      return [];
+    });
+
+    // Always show: Firestore coupons + CMS offers + synced promos
+    return [...couponOffers, ...cmsOffers, ...syncedDefaultOffers];
+  }, [firestoreCoupons, visibleCms, systemSettings.orders.freeDeliveryThreshold, systemSettings.orders.deliveryFee]);
 
   // ─── Product grouping ────────────────────────────────────────────────────────
   // Smart resolve: if product is in "Others" but name/sub matches a known category, reroute it
@@ -327,6 +352,15 @@ export default function Home() {
         </h1>
         <p className="text-gray-500 text-sm font-medium mt-0.5">Let's crave something fresh today.</p>
       </div>
+
+      {/* ─── STORE DISTANCE & RADIUS AVAILABILITY ─────────────────────────────── */}
+      <StoreAvailabilityBar
+        availableProductCount={
+          isOutsideSelectedRadius
+            ? 0
+            : products.filter((p) => p.isAvailable && !p.isComingSoon).length
+        }
+      />
 
       {/* ─── DOUBLE COINS CAMPAIGN BANNER ─── */}
       <AnimatePresence>
@@ -559,7 +593,11 @@ export default function Home() {
                       )}
                     </div>
                  </div>
-                 <button className="ripple-btn bg-gray-100 p-2 rounded-xl text-[#7A0000] hover:bg-red-50 transition-colors" onClick={() => addToCart(product)}>
+                 <button
+                   className="ripple-btn bg-gray-100 p-2 rounded-xl text-[#7A0000] hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                   disabled={!product.isAvailable || product.isComingSoon || isOutsideSelectedRadius}
+                   onClick={() => addToCart(product)}
+                 >
                    <ShoppingCart className="w-4 h-4" />
                  </button>
               </div>
@@ -620,7 +658,10 @@ export default function Home() {
                 </div>
 
                 {/* All products in one grid */}
-                <ProductGrid products={(Object.values(subGroups) as Product[][]).flat()} />
+                <ProductGrid
+                  products={(Object.values(subGroups) as Product[][]).flat()}
+                  locationUnavailable={isOutsideSelectedRadius}
+                />
               </motion.section>
             );
           })}

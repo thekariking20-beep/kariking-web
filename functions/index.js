@@ -381,10 +381,34 @@ exports.createOrder = onCall(async (request) => {
 
   try {
 
-  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey, couponCode } = request.data;
+  const { items, address, phone, useCoins, paymentMethod, deliveryFee, coinsToUse: requestedCoins, idempotencyKey, couponCode, deliveryLat, deliveryLng, deliveryDistanceKm } = request.data;
   
   if (!items || !items.length || !address || !phone) {
     throw new HttpsError("invalid-argument", "Missing required fields.");
+  }
+
+  // ─── Read live store order & delivery settings (`settings/system`) ───────
+  let ordersSettings = null;
+  let deliverySettings = null;
+  let hasServerOrderSettings = false;
+  try {
+    const settingsSnap = await db.doc("settings/system").get();
+    if (settingsSnap.exists) {
+      const sData = settingsSnap.data() || {};
+      if (sData.orders) {
+        ordersSettings = sData.orders;
+        hasServerOrderSettings = true;
+      }
+      if (sData.delivery) {
+        deliverySettings = sData.delivery;
+      }
+    }
+  } catch (settingsErr) {
+    console.warn("Could not read settings/system in createOrder:", settingsErr.message);
+  }
+
+  if (deliverySettings && deliverySettings.enabled === false) {
+    throw new HttpsError("failed-precondition", "Deliveries are currently paused by the store.");
   }
 
   const userId = request.auth.uid;
@@ -530,6 +554,27 @@ exports.createOrder = onCall(async (request) => {
     }
   }
 
+  const minOrderAmount = hasServerOrderSettings && typeof ordersSettings.minOrderAmount === 'number'
+    ? Math.max(0, ordersSettings.minOrderAmount)
+    : 0;
+  if (minOrderAmount > 0 && totalPrice < minOrderAmount) {
+    throw new HttpsError("failed-precondition", `Minimum order amount is ₹${minOrderAmount}.`);
+  }
+
+  const configuredDeliveryFee = hasServerOrderSettings && typeof ordersSettings.deliveryFee === 'number'
+    ? Math.max(0, ordersSettings.deliveryFee)
+    : Math.max(0, deliveryFee || 0);
+  const freeDeliveryThreshold = hasServerOrderSettings && typeof ordersSettings.freeDeliveryThreshold === 'number'
+    ? Math.max(0, ordersSettings.freeDeliveryThreshold)
+    : 1000;
+  const qualifiesForFreeDelivery = freeDeliveryThreshold > 0 && totalPrice >= freeDeliveryThreshold;
+  const appliedDeliveryFee = hasServerOrderSettings
+    ? (qualifiesForFreeDelivery ? 0 : configuredDeliveryFee)
+    : (deliveryFee || 0);
+  const deliverySavings = appliedDeliveryFee === 0 && qualifiesForFreeDelivery
+    ? (hasServerOrderSettings ? configuredDeliveryFee : 40)
+    : 0;
+
   const subtotalAfterCoupon = Math.max(0, totalPrice - couponDiscount);
 
   // ─── Handle coins — ATOMIC via Firestore Transaction ──────────────────
@@ -601,7 +646,7 @@ exports.createOrder = onCall(async (request) => {
     });
   }
 
-  const finalAmount = Math.max(0, totalPrice - discountAmount) + (deliveryFee || 0);
+  const finalAmount = Math.max(0, totalPrice - discountAmount) + appliedDeliveryFee;
   const now = new Date().toISOString();
 
   // Fetch customer name for invoice
@@ -642,8 +687,11 @@ exports.createOrder = onCall(async (request) => {
     couponCode: appliedCouponCode || null,
     couponDiscount: couponDiscount,
     discountAmount,
-    totalSavings: discountAmount + ((deliveryFee || 0) === 0 && totalPrice >= 500 ? 40 : 0),
-    deliveryCharge: deliveryFee || 0,
+    totalSavings: discountAmount + deliverySavings,
+    deliveryCharge: appliedDeliveryFee,
+    ...(typeof deliveryLat === 'number' && Number.isFinite(deliveryLat) ? { deliveryLat } : {}),
+    ...(typeof deliveryLng === 'number' && Number.isFinite(deliveryLng) ? { deliveryLng } : {}),
+    ...(typeof deliveryDistanceKm === 'number' && Number.isFinite(deliveryDistanceKm) ? { deliveryDistanceKm } : {}),
     utrNumber: null,
     isCOD: paymentMethod === 'cod',
     idempotencyKey: idempotencyKey || null,

@@ -6,6 +6,7 @@ import { COIN_VALUE } from '../../config/coins';
 import { Order, User, BulkBooking, Product, BulkBookingItem, BulkBookingStatusHistory } from '../../types';
 import { db } from '../../firebase';
 import { downloadInvoice, resolveCustomerName } from '../../lib/invoiceGenerator';
+import { useAddress } from '../../context/AddressContext';
 import { collection, query, onSnapshot, orderBy, doc, updateDoc, runTransaction, getDocs, where } from 'firebase/firestore';
 import { downloadQuotation, printQuotation } from '../../lib/quotationGenerator';
 import { 
@@ -175,6 +176,7 @@ function formatQty(qty: number, unit?: string): string {
 // ─── Order Details Modal ─────────────────────────────────────────────────
 function OrderDetailsModal({ order, onClose }: { order: Order; onClose: () => void }) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const { systemSettings } = useAddress();
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -183,10 +185,18 @@ function OrderDetailsModal({ order, onClose }: { order: Order; onClose: () => vo
     });
   };
 
-  // ─── Pricing computations (mirrors invoiceGenerator.ts) ───
+  // ─── Pricing computations (mirrors invoiceGenerator.ts & system settings) ───
   const deliveryCharge = order.deliveryCharge ?? 0;
   const coinDiscount = order.coinsDiscountAmount || (order.coinsUsed > 0 ? order.coinsUsed * COIN_VALUE : 0);
-  const totalSavings = (order.couponDiscount || 0) + coinDiscount + (deliveryCharge === 0 && order.totalAmount >= 500 ? 40 : 0);
+  const freeThresh = systemSettings.orders.freeDeliveryThreshold;
+  const deliverySavings =
+    deliveryCharge === 0 && freeThresh > 0 && order.totalAmount >= freeThresh
+      ? systemSettings.orders.deliveryFee
+      : 0;
+  const totalSavings =
+    typeof order.totalSavings === 'number'
+      ? order.totalSavings
+      : (order.couponDiscount || 0) + coinDiscount + deliverySavings;
 
   // ─── Status color map ───
   const statusColors: Record<string, string> = {
@@ -349,7 +359,7 @@ function OrderDetailsModal({ order, onClose }: { order: Order; onClose: () => vo
           {/* Grand Total */}
           <div className="flex justify-between items-center pt-2 border-t border-gray-200">
             <span className="text-gray-900 font-black text-sm">Total Paid</span>
-            <span className="text-red-700 font-black text-xl">₹{order.finalAmount || order.totalAmount}</span>
+            <span className="text-red-700 font-black text-xl">₹{order.finalAmount ?? order.totalAmount}</span>
           </div>
         </div>
       </div>

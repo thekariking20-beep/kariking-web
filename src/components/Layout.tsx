@@ -1,18 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { ShoppingCart, LogOut, Package, LayoutDashboard, Gift, User } from 'lucide-react';
+import { ShoppingCart, LogOut, Package, LayoutDashboard, Gift, User, MapPin, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
+import { useAddress } from '../context/AddressContext';
 import { cn } from '../lib/utils';
 import MobileHeader from './MobileHeader';
 import BottomNav from './BottomNav';
 import WelcomeAnimation from './WelcomeAnimation';
 import NotificationToast from './NotificationToast';
+import LocationPickerModal from './location/LocationPickerModal';
 
 export default function Layout() {
   const { user, isAdmin, isManager, isDelivery, logout } = useAuth();
   const { totalItems } = useCart();
+  const { displayLocation, displayCity } = useAddress();
   const location = useLocation();
+  const [isLocationOpen, setIsLocationOpen] = useState(false);
 
   const isDeliveryPage = location.pathname.startsWith('/delivery');
   const isAdminPage = location.pathname === '/admin';
@@ -55,11 +59,29 @@ export default function Layout() {
       {/* ── DESKTOP NAV (hidden on admin & delivery pages) ──────────────── */}
       {!isAdminPage && (
         <nav className="hidden md:flex items-center justify-between px-8 py-4 bg-white shadow-sm sticky top-0 z-40">
-          <Link to="/" className="flex items-center gap-2">
-            <span className="text-2xl font-black text-red-600">Kari</span>
-            <span className="text-2xl font-black text-gray-900">King</span>
-            <span className="text-xs text-amber-600 font-bold ml-1">👑</span>
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/" className="flex items-center gap-2">
+              <span className="text-2xl font-black text-red-600">Kari</span>
+              <span className="text-2xl font-black text-gray-900">King</span>
+              <span className="text-xs text-amber-600 font-bold ml-1">👑</span>
+            </Link>
+
+            {!isDelivery && (
+              <button
+                onClick={() => setIsLocationOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-red-50/70 border border-gray-200 hover:border-red-200 transition-all text-left max-w-[230px]"
+              >
+                <MapPin className="w-4 h-4 text-red-600 shrink-0" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-black text-gray-900 truncate">{displayLocation}</span>
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                  </div>
+                  <p className="text-[10px] font-medium text-gray-500 truncate">{displayCity}</p>
+                </div>
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-8">
             {desktopNavItems.map(item => {
               if (item.adminOnly && !isAdmin) return null;
@@ -126,6 +148,12 @@ export default function Layout() {
       {!isDeliveryPage && !isDelivery && !isAdminPage && <BottomNav />}
 
       {!isAdminPage && <WelcomeAnimation />}
+
+      <LocationPickerModal
+        isOpen={isLocationOpen}
+        onClose={() => setIsLocationOpen(false)}
+        initialTab="pointing"
+      />
     </div>
   );
 }

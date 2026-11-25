@@ -34,6 +34,52 @@ export interface User {
   totalCoinsRedeemed?: number;
 }
 
+export type PointingLocationSource = 'preset' | 'gps' | 'pin' | 'saved_address';
+
+export interface OfflineLocationEntry {
+  id: string;
+  name: string;
+  area: string;
+  city: string;
+  pincode: string;
+  state: string;
+  lat: number;
+  lng: number;
+  aliases?: string[];
+}
+
+export interface PointingLocation {
+  label: string;
+  area?: string;
+  city?: string;
+  pincode?: string;
+  lat: number;
+  lng: number;
+  source: PointingLocationSource;
+  matchedBy?: string;
+  updatedAt: string;
+}
+
+export interface StoreLocation {
+  id: string;
+  name: string;
+  address: string;
+  phone?: string;
+  email?: string;
+  lat: number;
+  lng: number;
+  maxRadiusKm: number;
+  isActive: boolean;
+  hasConfiguredCoordinates: boolean;
+}
+
+export interface StoreWithDistance extends StoreLocation {
+  distanceKm: number;
+  inSelectedRadius: boolean;
+  inStoreMaxRadius: boolean;
+  bearing: string;
+}
+
 export interface UserAddress {
   id: string;
   name: 'Home' | 'Work' | 'Other';
@@ -42,6 +88,9 @@ export interface UserAddress {
   pincode: string;
   state: string;
   fullAddress: string;   // Auto-computed: `${street}, ${city} - ${pincode}`
+  lat?: number;
+  lng?: number;
+  locationSource?: PointingLocationSource;
   isDefault: boolean;
   createdAt: string;
 }
@@ -212,6 +261,10 @@ export interface BulkBooking {
   statusHistory?: BulkBookingStatusHistory[];
 
   // Timestamps
+  deliveryLat?: number;
+  deliveryLng?: number;
+  deliveryDistanceKm?: number;
+  totalSavings?: number;
   createdAt: string;
   updatedAt: string;
   reviewedAt?: string;
@@ -287,6 +340,10 @@ export interface Order {
   pickedAt?: string;
   outForDeliveryAt?: string;
   deliveredAt?: string;
+  deliveryLat?: number;
+  deliveryLng?: number;
+  deliveryDistanceKm?: number;
+  totalSavings?: number;
   createdAt: string;
   updatedAt: string;
   // Reward system tracking
@@ -329,6 +386,9 @@ export interface SystemSettings {
     contactNumber: string;
     contactEmail: string;
     openingHours: string;
+    storeLat?: number;
+    storeLng?: number;
+    gst?: string;
   };
   orders: {
     minOrderAmount: number;

@@ -195,64 +195,55 @@ export async function generateInvoicePDF(order: Order, customerName?: string) {
   doc.text(`#${order.id.slice(-8).toUpperCase()}`, col1 + 55, metaVY);
 
   const paymentLabels: Record<string, string> = {
-    qr: 'UPI QR Payment',
+    qr: 'GPay Paid',
     coins: 'Kari Coins',
-    cod: 'Cash on Delivery',
+    cod: 'Cash on Delivered',
   };
-  doc.text(paymentLabels[order.paymentMethod] || order.paymentMethod, col1 + 110, metaVY);
+  const fallbackPaymentLabel = order.isCOD ? 'Cash on Delivered' : 'GPay Paid';
+  doc.text(paymentLabels[order.paymentMethod] || fallbackPaymentLabel, col1 + 110, metaVY);
 
   y += 20;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // UPI PAYMENT VERIFICATION BANNER (if applicable)
+  // PAYMENT STATUS BANNER (GPay Paid / Cash on Delivered)
   // ═══════════════════════════════════════════════════════════════════════
-  if (order.paymentMethod === 'qr') {
-    const isPaid = order.paymentStatus === 'paid' || order.paymentStatus === 'confirmed';
-
-    doc.setFillColor(isPaid ? 240 : 255, isPaid ? 253 : 247, isPaid ? 244 : 237);
-    doc.roundedRect(margin, y, pageWidth - margin * 2, isPaid && order.utrNumber ? 16 : 10, 2, 2, 'F');
+  if (order.paymentMethod === 'qr' || (!order.paymentMethod && !order.isCOD)) {
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, order.utrNumber ? 16 : 10, 2, 2, 'F');
 
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
+    doc.setTextColor(22, 163, 74);
+    doc.text('GPAY PAID', col1 + 3, y + 5.5);
 
-    if (isPaid) {
-      doc.setTextColor(22, 163, 74);
-      doc.text('PAYMENT VERIFIED', col1 + 3, y + 5);
-      if (order.utrNumber) {
-        doc.setTextColor(...grayText);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`UTR: ${order.utrNumber}`, col1 + 3, y + 10);
-        if (order.verifiedAt) {
-          doc.text(`Verified: ${formatDate(order.verifiedAt)}`, col1 + 80, y + 10);
-        }
+    if (order.utrNumber) {
+      doc.setTextColor(...grayText);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`UTR: ${order.utrNumber}`, col1 + 3, y + 11);
+      if (order.verifiedAt) {
+        doc.text(`Verified: ${formatDate(order.verifiedAt)}`, col1 + 80, y + 11);
       }
-    } else {
-      doc.setTextColor(220, 120, 0);
-      doc.text(`PAYMENT STATUS: ${(order.paymentStatus || 'pending').toUpperCase()}`, col1 + 3, y + 5);
     }
 
-    y += (isPaid && order.utrNumber ? 20 : 14);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════
-  // COD PAYMENT STATUS BANNER (if applicable)
-  // ═══════════════════════════════════════════════════════════════════════
-  if (order.paymentMethod === 'cod') {
-    const isCollected = (order as any).codCollectedAt || order.paymentStatus === 'collected';
-
-    doc.setFillColor(isCollected ? 240 : 255, isCollected ? 253 : 251, isCollected ? 244 : 235);
+    y += order.utrNumber ? 20 : 14;
+  } else if (order.paymentMethod === 'cod' || order.isCOD) {
+    doc.setFillColor(240, 253, 244);
     doc.roundedRect(margin, y, pageWidth - margin * 2, 10, 2, 2, 'F');
 
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
+    doc.setTextColor(22, 163, 74);
+    doc.text('CASH ON DELIVERED', col1 + 3, y + 6);
 
-    if (isCollected) {
-      doc.setTextColor(22, 163, 74);
-      doc.text('CASH COLLECTED', col1 + 3, y + 5);
-    } else {
-      doc.setTextColor(180, 120, 0);
-      doc.text('COD — PAYMENT PENDING', col1 + 3, y + 5);
-    }
+    y += 14;
+  } else if (order.paymentMethod === 'coins') {
+    doc.setFillColor(240, 253, 244);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, 10, 2, 2, 'F');
+
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(22, 163, 74);
+    doc.text('PAID VIA KARI COINS', col1 + 3, y + 6);
 
     y += 14;
   }

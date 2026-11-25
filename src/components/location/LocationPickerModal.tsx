@@ -23,7 +23,7 @@ import {
   resolveOfflineCoordinates,
   searchOfflineLocations,
 } from '../../config/locationDataset';
-import { formatDistanceKm, haversineDistanceKm, RADIUS_PRESETS } from '../../lib/geo';
+import { haversineDistanceKm } from '../../lib/geo';
 import { OfflineLocationEntry, PointingLocationSource } from '../../types';
 import { cn } from '../../lib/utils';
 import LocalRadarPicker from './LocalRadarPicker';
@@ -91,8 +91,6 @@ export default function LocationPickerModal({
     storeLocation,
     activeCenter,
     setPointingLocation,
-    radiusKm,
-    setRadiusKm,
   } = useAddress();
 
   const [modeTab, setModeTab] = useState<'pointing' | 'address'>(initialTab);
@@ -105,7 +103,6 @@ export default function LocationPickerModal({
   const [draftLat, setDraftLat] = useState<number>(storeLocation.lat);
   const [draftLng, setDraftLng] = useState<number>(storeLocation.lng);
   const [draftSource, setDraftSource] = useState<PointingLocationSource>('preset');
-  const [draftRadiusKm, setDraftRadiusKm] = useState<number>(radiusKm);
   const [showRadar, setShowRadar] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsMessage, setGpsMessage] = useState<{ type: 'error' | 'info'; text: string } | null>(null);
@@ -133,7 +130,6 @@ export default function LocationPickerModal({
 
     setModeTab(onSave ? 'address' : initialTab);
     setAreaSearch('');
-    setDraftRadiusKm(radiusKm);
     setShowRadar(false);
     setGpsMessage(null);
 
@@ -165,7 +161,7 @@ export default function LocationPickerModal({
     setTouched({});
     setSaveSuccess(false);
     setSaveError('');
-  }, [isOpen, initialTab, onSave, radiusKm, activeCenter, storeLocation.lat, storeLocation.lng]);
+  }, [isOpen, initialTab, onSave, activeCenter, storeLocation.lat, storeLocation.lng]);
 
   // ─── Derived values ───────────────────────────────────────────────────────
   const searchResults = useMemo(() => searchOfflineLocations(areaSearch), [areaSearch]);
@@ -175,7 +171,7 @@ export default function LocationPickerModal({
     [draftLat, draftLng, storeLocation.lat, storeLocation.lng]
   );
 
-  const isDraftInRange = draftDistanceKm <= draftRadiusKm;
+  const isDraftInRange = draftDistanceKm <= storeLocation.maxRadiusKm;
 
   const isFormValid = useMemo(() => {
     return Object.keys(validate(street, city, pincode)).length === 0;
@@ -275,7 +271,6 @@ export default function LocationPickerModal({
   };
 
   const handleApplyPointingLocation = () => {
-    setRadiusKm(draftRadiusKm);
     setPointingLocation({
       label: draftLabel || 'Pinned Location',
       city: draftCity,
@@ -401,7 +396,7 @@ export default function LocationPickerModal({
                   </h2>
                   <p className="text-xs font-medium text-gray-500 mt-0.5">
                     {modeTab === 'pointing'
-                      ? 'Point your area & radius to check store distance and stock offline'
+                      ? 'Choose your area or GPS location to check delivery availability'
                       : 'Save a full delivery address for checkout'}
                   </p>
                 </div>
@@ -501,42 +496,13 @@ export default function LocationPickerModal({
                       storeLng={storeLocation.lng}
                       storeName={storeLocation.name}
                       maxRadiusKm={storeLocation.maxRadiusKm}
-                      radiusKm={draftRadiusKm}
+                      radiusKm={storeLocation.maxRadiusKm}
                       lat={draftLat}
                       lng={draftLng}
                       onChange={handleRadarChange}
                       mode="customer"
                     />
                   )}
-
-                  {/* Radius Pills */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-[10px] font-black uppercase tracking-widest text-gray-400">
-                        Search Radius
-                      </label>
-                      <span className="text-[10px] font-bold text-gray-500">
-                        Store standard range: {storeLocation.maxRadiusKm} km
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {RADIUS_PRESETS.map((km) => (
-                        <button
-                          key={km}
-                          type="button"
-                          onClick={() => setDraftRadiusKm(km)}
-                          className={cn(
-                            'px-3.5 py-2 rounded-xl text-xs font-black transition-all border',
-                            draftRadiusKm === km
-                              ? 'bg-[#8B0000] text-white border-[#8B0000] shadow-sm'
-                              : 'bg-white text-gray-600 border-gray-200 hover:border-red-300'
-                          )}
-                        >
-                          {km} km
-                        </button>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Saved Addresses Quick Pick */}
                   {user && addresses.length > 0 && (
@@ -550,6 +516,7 @@ export default function LocationPickerModal({
                           const dist = resolved
                             ? haversineDistanceKm(resolved.lat, resolved.lng, storeLocation.lat, storeLocation.lng)
                             : null;
+                          const inZone = dist !== null ? dist <= storeLocation.maxRadiusKm : true;
                           const isSelected = selectedAddress?.id === addr.id;
                           return (
                             <button
@@ -587,8 +554,13 @@ export default function LocationPickerModal({
                                   {addr.name}
                                 </span>
                                 {dist !== null && (
-                                  <span className="text-[10px] font-bold text-gray-500">
-                                    • {formatDistanceKm(dist, false)}
+                                  <span
+                                    className={cn(
+                                      'text-[9px] font-bold',
+                                      inZone ? 'text-green-600' : 'text-amber-600'
+                                    )}
+                                  >
+                                    • {inZone ? 'Deliverable' : 'Out of zone'}
                                   </span>
                                 )}
                               </div>
@@ -634,7 +606,7 @@ export default function LocationPickerModal({
                           const isSelected =
                             Math.abs(draftLat - entry.lat) < 0.0002 &&
                             Math.abs(draftLng - entry.lng) < 0.0002;
-                          const inRad = dist <= draftRadiusKm;
+                          const inRad = dist <= storeLocation.maxRadiusKm;
 
                           return (
                             <button
@@ -662,7 +634,7 @@ export default function LocationPickerModal({
                                     : 'bg-gray-100 text-gray-500'
                                 )}
                               >
-                                {formatDistanceKm(dist, false)}
+                                {inRad ? 'Deliverable' : 'Outside zone'}
                               </span>
                             </button>
                           );
@@ -682,7 +654,7 @@ export default function LocationPickerModal({
                   >
                     <div className="min-w-0">
                       <p className="text-[10px] font-black uppercase tracking-widest text-gray-500">
-                        Active Pointing Center
+                        Selected Location
                       </p>
                       <p className="text-sm font-black text-gray-900 truncate">
                         {draftLabel || 'Custom Pin'}
@@ -693,10 +665,9 @@ export default function LocationPickerModal({
                           isDraftInRange ? 'text-green-700' : 'text-amber-800'
                         )}
                       >
-                        {storeLocation.name}: {formatDistanceKm(draftDistanceKm)} •{' '}
                         {isDraftInRange
-                          ? `Available within ${draftRadiusKm} km`
-                          : `Outside ${draftRadiusKm} km radius`}
+                          ? `Delivery available from ${storeLocation.name}`
+                          : `Outside ${storeLocation.maxRadiusKm} km store delivery zone`}
                       </p>
                     </div>
                     {user && (
@@ -716,7 +687,7 @@ export default function LocationPickerModal({
                     onClick={handleApplyPointingLocation}
                     className="ripple-btn w-full py-4 rounded-xl bg-premium-gradient text-white font-black uppercase tracking-wide flex items-center justify-center gap-2 shadow-[0_8px_20px_rgba(122,0,0,0.3)] active:scale-95 transition-all"
                   >
-                    <span>Apply Location &amp; {draftRadiusKm} km Radius</span>
+                    <span>Confirm Location</span>
                     <ChevronRight className="w-5 h-5" />
                   </button>
                 </>
@@ -864,15 +835,14 @@ export default function LocationPickerModal({
                       <div className="min-w-0">
                         <p className="font-bold text-blue-900 truncate">{resolvedAddressPreview.matchLabel}</p>
                         <p className="text-[10px] text-blue-700 font-medium">
-                          Distance to {storeLocation.name}:{' '}
-                          {formatDistanceKm(
-                            haversineDistanceKm(
-                              resolvedAddressPreview.lat,
-                              resolvedAddressPreview.lng,
-                              storeLocation.lat,
-                              storeLocation.lng
-                            )
-                          )}
+                          {haversineDistanceKm(
+                            resolvedAddressPreview.lat,
+                            resolvedAddressPreview.lng,
+                            storeLocation.lat,
+                            storeLocation.lng
+                          ) <= storeLocation.maxRadiusKm
+                            ? `Within ${storeLocation.name} delivery area`
+                            : `Outside ${storeLocation.maxRadiusKm} km delivery zone`}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">

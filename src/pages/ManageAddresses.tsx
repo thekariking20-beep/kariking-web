@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { resolveAddressCoordinates, useAddress } from '../context/AddressContext';
 import LocationPickerModal from '../components/location/LocationPickerModal';
-import { formatDistanceKm, haversineDistanceKm } from '../lib/geo';
+import { haversineDistanceKm } from '../lib/geo';
 import { cn } from '../lib/utils';
 
 const tagIcons = {
@@ -85,23 +85,20 @@ export default function ManageAddresses() {
                     {(() => {
                       const coords = resolveAddressCoordinates(addr);
                       if (!coords) {
-                        return (
-                          <p className="text-[11px] text-amber-600 font-bold mt-1.5">
-                            Legacy address (no coordinates mapped yet)
-                          </p>
-                        );
+                        return null;
                       }
                       const dist = haversineDistanceKm(coords.lat, coords.lng, storeLocation.lat, storeLocation.lng);
+                      const inZone = dist <= storeLocation.maxRadiusKm;
                       return (
-                        <p className="text-[11px] text-emerald-700 font-bold mt-1.5">
-                          {formatDistanceKm(dist)} from {storeLocation.name}
+                        <p className={cn('text-[11px] font-bold mt-1.5', inZone ? 'text-emerald-700' : 'text-amber-600')}>
+                          {inZone ? 'Within delivery area' : 'Outside delivery zone'}
                         </p>
                       );
                     })()}
                     
                     <div className="mt-4 flex gap-3">
                       {addr.id !== selectedAddress?.id && (
-                        <button onClick={() => setDefaultAddress(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set Selected &amp; Point Here</button>
+                        <button onClick={() => setDefaultAddress(addr)} className="text-[11px] font-bold text-[#8B0000] uppercase tracking-wider py-1">Set as Selected</button>
                       )}
                     </div>
                   </div>

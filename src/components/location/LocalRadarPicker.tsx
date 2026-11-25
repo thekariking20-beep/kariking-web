@@ -231,8 +231,7 @@ export default function LocalRadarPicker({
             </div>
             {mode === 'customer' ? (
               <p className={`text-xs font-black ${inRadius ? 'text-green-600' : 'text-red-600'}`}>
-                {formatDistanceKm(distanceKm)} ({bearing}) •{' '}
-                {inRadius ? `Inside ${radiusKm} km` : `Outside ${radiusKm} km`}
+                {inRadius ? 'Inside delivery zone' : `Outside ${maxRadiusKm} km delivery zone`}
               </p>
             ) : (
               <p className="text-xs font-bold text-blue-700">

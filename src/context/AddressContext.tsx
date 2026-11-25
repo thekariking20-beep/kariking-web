@@ -14,14 +14,13 @@ import {
   DEFAULT_SYSTEM_SETTINGS,
   mergeSystemSettings,
 } from '../lib/storeProfile';
-import { evaluateStoresWithinRadius, formatDistanceKm } from '../lib/geo';
+import { evaluateStoresWithinRadius } from '../lib/geo';
 import { resolveOfflineCoordinates } from '../config/locationDataset';
 
 // ─── localStorage cache keys ───────────────────────────────────────────────
 const CACHE_KEY_ADDRESSES = 'kk_addresses_cache';
 const CACHE_KEY_SELECTED = 'kk_selected_address_id';
 const CACHE_KEY_POINTING = 'kk_pointing_location';
-const CACHE_KEY_RADIUS = 'kk_selected_radius_km';
 const CACHE_KEY_SETTINGS = 'kk_system_settings_cache';
 
 /** Read cached addresses from localStorage (instant load, no network) */
@@ -62,17 +61,6 @@ function getCachedPointingLocation(): PointingLocation | null {
       return parsed;
     }
     return null;
-  } catch {
-    return null;
-  }
-}
-
-function getCachedRadiusKm(): number | null {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY_RADIUS);
-    if (!raw) return null;
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   } catch {
     return null;
   }
@@ -178,13 +166,6 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
   const [pointingLocation, setPointingLocationState] = useState<PointingLocation | null>(() =>
     getCachedPointingLocation()
   );
-  const [hasExplicitRadius, setHasExplicitRadius] = useState<boolean>(() => getCachedRadiusKm() !== null);
-  const [radiusKm, setRadiusKmState] = useState<number>(() => {
-    const cached = getCachedRadiusKm();
-    if (cached) return cached;
-    const merged = mergeSystemSettings(getCachedRawSettings());
-    return merged.delivery.maxRadiusKm || DEFAULT_SYSTEM_SETTINGS.delivery.maxRadiusKm;
-  });
 
   // ─── Real-time listener on settings/system (public read allowed in rules) ───
   useEffect(() => {
@@ -198,9 +179,6 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
           try {
             localStorage.setItem(CACHE_KEY_SETTINGS, JSON.stringify(data));
           } catch { /* ignore */ }
-          if (!hasExplicitRadius && data?.delivery?.maxRadiusKm && data.delivery.maxRadiusKm > 0) {
-            setRadiusKmState(data.delivery.maxRadiusKm);
-          }
         }
       },
       (err) => {
@@ -209,7 +187,7 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
     );
 
     return () => unsub();
-  }, [hasExplicitRadius]);
+  }, []);
 
   // ─── Real-time listener on users/{uid}/addresses ──────────────────────────
   useEffect(() => {
@@ -255,6 +233,9 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
   );
 
   const storeLocations = useMemo(() => [storeLocation], [storeLocation]);
+
+  // Delivery radius is strictly controlled by Admin -> Delivery Settings
+  const radiusKm = systemSettings.delivery.maxRadiusKm || DEFAULT_SYSTEM_SETTINGS.delivery.maxRadiusKm;
 
   // ─── Derived: selected saved address ──────────────────────────────────────
   const selectedAddress = addresses.find((a) => a.id === user?.selectedAddressId) || addresses[0] || null;
@@ -308,13 +289,8 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(CACHE_KEY_POINTING);
   }, []);
 
-  const setRadiusKm = useCallback((km: number) => {
-    const safeKm = Math.max(0.5, km);
-    setHasExplicitRadius(true);
-    setRadiusKmState(safeKm);
-    try {
-      localStorage.setItem(CACHE_KEY_RADIUS, String(safeKm));
-    } catch { /* ignore */ }
+  const setRadiusKm = useCallback((_km: number) => {
+    // Radius is governed by Admin Delivery Settings (`systemSettings.delivery.maxRadiusKm`)
   }, []);
 
   // ─── Display strings for header ────────────────────────────────────────────
@@ -324,11 +300,12 @@ export function AddressProvider({ children }: { children: React.ReactNode }) {
       ? selectedAddress.street || (selectedAddress.fullAddress || '').split(',')[0].trim() || selectedAddress.name || 'Saved Location'
       : 'Set Location';
 
-  const displayCity = activeCenter && nearestStore
-    ? `${formatDistanceKm(nearestStore.distanceKm, false)} • ${radiusKm} km`
+  const displayCity = activeCenter
+    ? [activeCenter.city, activeCenter.pincode].filter(Boolean).join(' - ') ||
+      (selectedAddress ? [selectedAddress.city, selectedAddress.pincode].filter(Boolean).join(' - ') : 'Tamil Nadu')
     : selectedAddress
-      ? `${selectedAddress.city || ''} - ${selectedAddress.pincode || ''}`.replace(/^ - $/, 'Tamil Nadu')
-      : 'Tap to point area';
+      ? [selectedAddress.city, selectedAddress.pincode].filter(Boolean).join(' - ') || 'Tamil Nadu'
+      : 'Tap to set location';
 
   // ─── Set default address ───────────────────────────────────────────────────
   const setDefaultAddress = useCallback(async (address: UserAddress) => {

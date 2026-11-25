@@ -6,7 +6,7 @@ import type { Order } from '../types';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { resolveAddressCoordinates, useAddress } from '../context/AddressContext';
-import { formatDistanceKm, haversineDistanceKm } from '../lib/geo';
+import { haversineDistanceKm } from '../lib/geo';
 import { httpsCallable } from 'firebase/functions';
 import { functions, db } from '../firebase';
 import { doc } from 'firebase/firestore';
@@ -793,7 +793,7 @@ export default function Cart() {
                             'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded',
                             isBeyondStoreRadius ? 'bg-amber-100 text-amber-800' : 'bg-emerald-50 text-emerald-700'
                           )}>
-                            {formatDistanceKm(deliveryDistanceKm, false)} from {storeLocation.name}
+                            {isBeyondStoreRadius ? 'Outside Delivery Zone' : 'Delivery Available'}
                           </span>
                         )}
                       </div>
@@ -812,7 +812,7 @@ export default function Cart() {
                 <div className="mt-2.5 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2 text-xs text-amber-900 font-semibold">
                   <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <span>
-                    Your delivery address is <span className="font-black">{formatDistanceKm(deliveryDistanceKm)}</span> from {storeLocation.name}, beyond our standard {storeLocation.maxRadiusKm} km radius. Delivery confirmation is subject to store approval.
+                    Your selected address is outside {storeLocation.name}&apos;s standard {storeLocation.maxRadiusKm} km delivery zone. Order confirmation is subject to store approval.
                   </span>
                 </div>
               )}
